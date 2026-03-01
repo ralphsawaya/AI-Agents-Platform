@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Scheduler — AI Agent Platform{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Schedules</h1>
+    <button class="btn btn-primary" onclick="openModal('new-schedule-modal')">New Schedule</button>
+</div>
+
+<table>
+    <thead>
+        <tr>
+            <th>Agent</th>
+            <th>Type</th>
+            <th>Config</th>
+            <th>Next Run</th>
+            <th>Enabled</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody id="sched-body">
+        <tr><td colspan="6" class="text-dim">Loading…</td></tr>
+    </tbody>
+</table>
+
+<!-- New Schedule Modal -->
+<div class="modal-overlay" id="new-schedule-modal">
+    <div class="modal">
+        <h2>Create Schedule</h2>
+        <div class="form-group">
+            <label>Agent</label>
+            <select id="new-sched-agent"></select>
+        </div>
+        <div class="form-group">
+            <label>Type</label>
+            <select id="new-sched-type" onchange="toggleNewSchedFields()">
+                <option value="cron">Cron</option>
+                <option value="interval">Interval</option>
+                <option value="once">One-time</option>
+            </select>
+        </div>
+        <div class="form-group" id="new-sched-cron-group">
+            <label>Cron Expression</label>
+            <input type="text" id="new-sched-cron" placeholder="0 9 * * 1">
+        </div>
+        <div class="form-group" id="new-sched-interval-group" style="display:none">
+            <label>Interval (seconds)</label>
+            <input type="number" id="new-sched-interval" value="3600">
+        </div>
+        <div class="form-group" id="new-sched-once-group" style="display:none">
+            <label>Run At</label>
+            <input type="datetime-local" id="new-sched-runat">
+        </div>
+        <div class="form-group">
+            <label>Arguments (JSON)</label>
+            <textarea id="new-sched-args" rows="2">{}</textarea>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal('new-schedule-modal')">Cancel</button>
+            <button class="btn btn-primary" onclick="createNewSchedule()">Create</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let agentsCache = [];
+
+async function loadAll() {
+    const [schedRes, agentsRes] = await Promise.all([
+        API.get('/api/schedules'),
+        API.get('/api/agents'),
+    ]);
+
+    if (agentsRes.success) {
+        agentsCache = agentsRes.data;
+        const select = document.getElementById('new-sched-agent');
+        select.innerHTML = agentsRes.data.map(a =>
+            `<option value="${a._id}">${a.name}</option>`
+        ).join('');
+    }
+
+    if (schedRes.success) {
+        renderSchedules(schedRes.data);
+    }
+}
+
+function agentName(id) {
+    const a = agentsCache.find(x => x._id === id);
+    return a ? a.name : id.substring(0, 8) + '…';
+}
+
+function renderSchedules(scheds) {
+    const body = document.getElementById('sched-body');
+    if (!scheds.length) {
+        body.innerHTML = '<tr><td colspan="6" class="text-dim">No schedules.</td></tr>';
+        return;
+    }
+    body.innerHTML = scheds.map(s => `
+        <tr>
+            <td><a href="/agents/${s.agent_id}" style="color:var(--primary)">${agentName(s.agent_id)}</a></td>
+            <td>${s.schedule_type}</td>
+            <td class="mono text-sm">${s.cron_expression || (s.interval_seconds ? s.interval_seconds+'s' : fmtDate(s.run_at))}</td>
+            <td class="text-dim">${fmtDate(s.next_run_at)}</td>
+            <td>
+                <label class="toggle">
+                    <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSched('${s._id}')">
+                    <span class="slider"></span>
+                </label>
+            </td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteSched('${s._id}')">Delete</button></td>
+        </tr>
+    `).join('');
+}
+
+function toggleNewSchedFields() {
+    const t = document.getElementById('new-sched-type').value;
+    document.getElementById('new-sched-cron-group').style.display = t === 'cron' ? '' : 'none';
+    document.getElementById('new-sched-interval-group').style.display = t === 'interval' ? '' : 'none';
+    document.getElementById('new-sched-once-group').style.display = t === 'once' ? '' : 'none';
+}
+
+async function createNewSchedule() {
+    const t = document.getElementById('new-sched-type').value;
+    let args = {};
+    try { args = JSON.parse(document.getElementById('new-sched-args').value); } catch { toast('Invalid JSON', 'error'); return; }
+
+    const body = {
+        agent_id: document.getElementById('new-sched-agent').value,
+        schedule_type: t,
+        args,
+    };
+    if (t === 'cron') body.cron_expression = document.getElementById('new-sched-cron').value;
+    if (t === 'interval') body.interval_seconds = parseInt(document.getElementById('new-sched-interval').value);
+    if (t === 'once') body.run_at = new Date(document.getElementById('new-sched-runat').value).toISOString();
+
+    const res = await API.post('/api/schedules', body);
+    if (res.success) { toast('Schedule created', 'success'); closeModal('new-schedule-modal'); loadAll(); }
+    else toast(res.error, 'error');
+}
+
+async function toggleSched(id) {
+    await API.post(`/api/schedules/${id}/toggle`);
+    loadAll();
+}
+
+async function deleteSched(id) {
+    if (!confirm('Delete this schedule?')) return;
+    await API.del(`/api/schedules/${id}`);
+    loadAll();
+}
+
+loadAll();
+</script>
+{% endblock %}

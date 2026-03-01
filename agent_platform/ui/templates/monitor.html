@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Monitor — AI Agent Platform{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Live Monitor</h1>
+</div>
+
+<div id="alerts-area"></div>
+
+<table id="monitor-table">
+    <thead>
+        <tr>
+            <th>Agent</th>
+            <th>Run ID</th>
+            <th>PID</th>
+            <th>CPU %</th>
+            <th>Memory (MB)</th>
+            <th>Elapsed</th>
+            <th>Last Log</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody id="monitor-body">
+        <tr><td colspan="8" class="text-dim">No agents running.</td></tr>
+    </tbody>
+</table>
+
+<div class="mt-1" id="live-log-section" style="display:none">
+    <h3 class="mb-1">Live Log — <span id="live-log-run-id"></span></h3>
+    <div class="log-viewer" id="live-log-viewer"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let logWs = null;
+
+async function loadRunning() {
+    const res = await API.get('/api/monitor/running');
+    if (res.success) renderMonitor(res.data);
+}
+
+function renderMonitor(runs) {
+    const body = document.getElementById('monitor-body');
+    if (!runs.length) {
+        body.innerHTML = '<tr><td colspan="8" class="text-dim">No agents running.</td></tr>';
+        return;
+    }
+    body.innerHTML = runs.map(r => `
+        <tr>
+            <td>${r.agent_name}</td>
+            <td class="mono text-sm">${r.run_id.substring(0,8)}…</td>
+            <td>${r.pid}</td>
+            <td>${r.cpu_percent}%</td>
+            <td>${r.memory_mb}</td>
+            <td>${fmtDuration(r.elapsed_seconds)}</td>
+            <td class="text-dim text-sm" style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.last_log_line || '—'}</td>
+            <td>
+                <button class="btn btn-outline btn-sm" onclick="tailLog('${r.run_id}')">Tail</button>
+                <button class="btn btn-danger btn-sm" onclick="stopRun('${r.run_id}')">Stop</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function tailLog(runId) {
+    document.getElementById('live-log-section').style.display = 'block';
+    document.getElementById('live-log-run-id').textContent = runId.substring(0, 8) + '…';
+    const viewer = document.getElementById('live-log-viewer');
+    viewer.textContent = '';
+
+    if (logWs) logWs.close();
+    logWs = connectWS(`/ws/logs/${runId}`, (data) => {
+        if (data.type === 'log') {
+            viewer.textContent += data.line + '\n';
+            viewer.scrollTop = viewer.scrollHeight;
+        }
+    });
+}
+
+async function stopRun(runId) {
+    const res = await API.post(`/api/runs/${runId}/stop`);
+    toast(res.success ? 'Stopped' : res.error, res.success ? 'success' : 'error');
+    loadRunning();
+}
+
+async function loadAlerts() {
+    const res = await API.get('/api/monitor/alerts');
+    if (res.success && res.data.length) {
+        document.getElementById('alerts-area').innerHTML = res.data.map(a =>
+            `<div class="alert-banner">Agent "${a.name}" has ${a.consecutive_failures} consecutive failures!</div>`
+        ).join('');
+    }
+}
+
+// Global WebSocket for real-time monitor updates
+const monitorWs = connectWS('/ws/monitor', (data) => {
+    if (data.type === 'monitor' && data.runs) {
+        renderMonitor(data.runs);
+    }
+});
+
+loadRunning();
+loadAlerts();
+setInterval(loadRunning, 5000);
+</script>
+{% endblock %}

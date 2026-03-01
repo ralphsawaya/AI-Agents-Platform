@@ -1,0 +1,6 @@
+name: agent_alpha
+role: summarizer
+description: Receives text input and produces a concise summary using an LLM
+model: gpt-4o-mini
+temperature: 0.3
+max_tokens: 2048

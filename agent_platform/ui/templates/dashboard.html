@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — AI Agent Platform{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Dashboard</h1>
+    <button class="btn btn-primary" onclick="openModal('upload-modal')">Upload Agent</button>
+</div>
+
+<div class="stat-cards" id="stats">
+    <div class="stat-card"><div class="label">Total Agents</div><div class="value" id="stat-total">0</div></div>
+    <div class="stat-card"><div class="label">Running</div><div class="value" id="stat-running">0</div></div>
+    <div class="stat-card"><div class="label">Scheduled</div><div class="value" id="stat-scheduled">0</div></div>
+    <div class="stat-card"><div class="label">Errors</div><div class="value" id="stat-error">0</div></div>
+</div>
+
+<div class="filter-bar">
+    <div class="form-group">
+        <label>Search</label>
+        <input type="text" id="filter-name" placeholder="Agent name…" oninput="loadAgents()">
+    </div>
+    <div class="form-group">
+        <label>Status</label>
+        <select id="filter-status" onchange="loadAgents()">
+            <option value="">All</option>
+            <option value="idle">Idle</option>
+            <option value="running">Running</option>
+            <option value="scheduled">Scheduled</option>
+            <option value="error">Error</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label>Tags</label>
+        <input type="text" id="filter-tags" placeholder="tag1,tag2" oninput="loadAgents()">
+    </div>
+    <div class="view-toggle">
+        <button class="active" onclick="setView('card', this)">Cards</button>
+        <button onclick="setView('table', this)">Table</button>
+    </div>
+</div>
+
+<div id="agent-list"></div>
+
+<!-- Upload Modal -->
+<div class="modal-overlay" id="upload-modal">
+    <div class="modal">
+        <h2>Upload Agent Package</h2>
+        <div class="dropzone" id="dropzone" onclick="document.getElementById('zip-input').click()">
+            Drop .zip file here or click to browse
+        </div>
+        <input type="file" id="zip-input" accept=".zip" style="display:none" onchange="handleFileSelect(this)">
+        <div id="upload-file-name" class="text-sm text-dim mt-1"></div>
+        <div class="form-group mt-1">
+            <label>Agent Name (optional)</label>
+            <input type="text" id="upload-name" placeholder="Auto-detected from folder">
+        </div>
+        <div class="form-group">
+            <label>Description</label>
+            <textarea id="upload-desc" rows="2" placeholder="Optional description"></textarea>
+        </div>
+        <div class="form-group">
+            <label>Tags (comma-separated)</label>
+            <input type="text" id="upload-tags" placeholder="nlp, production">
+        </div>
+        <div id="upload-result" class="mt-1"></div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal('upload-modal')">Cancel</button>
+            <button class="btn btn-primary" id="upload-btn" onclick="doUpload()">Upload</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentView = 'card';
+let selectedFile = null;
+
+function setView(view, btn) {
+    currentView = view;
+    document.querySelectorAll('.view-toggle button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderAgents(window._agents || []);
+}
+
+async function loadAgents() {
+    const params = new URLSearchParams();
+    const name = document.getElementById('filter-name').value;
+    const status = document.getElementById('filter-status').value;
+    const tags = document.getElementById('filter-tags').value;
+    if (name) params.set('name', name);
+    if (status) params.set('status', status);
+    if (tags) params.set('tags', tags);
+    const res = await API.get('/api/agents?' + params);
+    if (res.success) {
+        window._agents = res.data;
+        renderAgents(res.data);
+        updateStats(res.data);
+    }
+}
+
+function updateStats(agents) {
+    document.getElementById('stat-total').textContent = agents.length;
+    document.getElementById('stat-running').textContent = agents.filter(a => a.status === 'running').length;
+    document.getElementById('stat-scheduled').textContent = agents.filter(a => a.status === 'scheduled').length;
+    document.getElementById('stat-error').textContent = agents.filter(a => a.status === 'error').length;
+}
+
+function renderAgents(agents) {
+    const el = document.getElementById('agent-list');
+    if (!agents.length) {
+        el.innerHTML = '<p class="text-dim">No agents found. Upload one to get started.</p>';
+        return;
+    }
+    if (currentView === 'card') {
+        el.innerHTML = '<div class="agent-grid">' + agents.map(a => `
+            <div class="agent-card" onclick="location.href='/agents/${a._id}'">
+                <div class="flex justify-between items-center">
+                    <h3>${a.name}</h3>
+                    ${statusBadge(a.venv_ready ? a.status : 'building')}
+                </div>
+                <div class="meta">
+                    ${a.agent_folders ? a.agent_folders.length + ' agent(s)' : ''} &middot;
+                    ${a.run_count || 0} runs &middot;
+                    ${a.tags && a.tags.length ? a.tags.join(', ') : 'no tags'}
+                </div>
+                <div class="meta mt-1">Last run: ${fmtDate(a.last_run_at)}</div>
+            </div>
+        `).join('') + '</div>';
+    } else {
+        el.innerHTML = `<table>
+            <thead><tr><th>Name</th><th>Status</th><th>Agents</th><th>Runs</th><th>Tags</th><th>Last Run</th></tr></thead>
+            <tbody>${agents.map(a => `
+                <tr style="cursor:pointer" onclick="location.href='/agents/${a._id}'">
+                    <td>${a.name}</td>
+                    <td>${statusBadge(a.venv_ready ? a.status : 'building')}</td>
+                    <td>${a.agent_folders ? a.agent_folders.length : 0}</td>
+                    <td>${a.run_count || 0}</td>
+                    <td class="text-dim">${a.tags && a.tags.length ? a.tags.join(', ') : '—'}</td>
+                    <td class="text-dim">${fmtDate(a.last_run_at)}</td>
+                </tr>
+            `).join('')}</tbody>
+        </table>`;
+    }
+}
+
+/* Upload */
+const dropzone = document.getElementById('dropzone');
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('dragover');
+    if (e.dataTransfer.files.length) {
+        selectedFile = e.dataTransfer.files[0];
+        document.getElementById('upload-file-name').textContent = selectedFile.name;
+    }
+});
+
+function handleFileSelect(input) {
+    if (input.files.length) {
+        selectedFile = input.files[0];
+        document.getElementById('upload-file-name').textContent = selectedFile.name;
+    }
+}
+
+async function doUpload() {
+    if (!selectedFile) { toast('Select a .zip file first', 'error'); return; }
+    const btn = document.getElementById('upload-btn');
+    btn.disabled = true;
+    btn.textContent = 'Uploading…';
+    document.getElementById('upload-result').innerHTML = '';
+
+    const fd = new FormData();
+    fd.append('file', selectedFile);
+    fd.append('name', document.getElementById('upload-name').value);
+    fd.append('description', document.getElementById('upload-desc').value);
+    fd.append('tags', document.getElementById('upload-tags').value);
+
+    const res = await API.upload('/api/agents/upload', fd);
+    btn.disabled = false;
+    btn.textContent = 'Upload';
+
+    if (res.success) {
+        toast('Agent uploaded successfully!', 'success');
+        closeModal('upload-modal');
+        selectedFile = null;
+        loadAgents();
+    } else {
+        document.getElementById('upload-result').innerHTML =
+            `<div class="alert-banner">${res.error}</div>`;
+    }
+}
+
+async function checkAlerts() {
+    const res = await API.get('/api/monitor/alerts');
+    if (res.success && res.data.length) {
+        document.getElementById('alert-area').innerHTML = res.data.map(a =>
+            `<div class="alert-banner">Agent "${a.name}" has ${a.consecutive_failures} consecutive failures.</div>`
+        ).join('');
+    }
+}
+
+loadAgents();
+checkAlerts();
+setInterval(loadAgents, 15000);
+</script>
+{% endblock %}

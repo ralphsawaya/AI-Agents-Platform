@@ -1,0 +1,480 @@
+{% extends "base.html" %}
+{% block title %}Agent Detail — AI Agent Platform{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1 id="agent-name">Loading…</h1>
+    <div class="flex gap-sm">
+        <button class="btn btn-primary" onclick="openModal('run-modal')">Run Now</button>
+        <a href="/" class="btn btn-outline">Back</a>
+    </div>
+</div>
+
+<div id="agent-status-bar" class="mb-1"></div>
+
+<div class="tabs">
+    <div class="tab active" data-tab="overview">Overview</div>
+    <div class="tab" data-tab="files">Files</div>
+    <div class="tab" data-tab="runs">Runs</div>
+    <div class="tab" data-tab="schedules">Schedules</div>
+    <div class="tab" data-tab="danger">Danger Zone</div>
+</div>
+
+<!-- Overview -->
+<div class="tab-content active" id="tab-overview">
+    <div class="stat-cards" id="overview-meta"></div>
+    <h3 class="mb-1">Detected Nodes</h3>
+    <div id="detected-nodes" class="mb-1 text-dim">—</div>
+    <h3 class="mb-1">Detected Tools</h3>
+    <div id="detected-tools" class="mb-1 text-dim">—</div>
+    <h3 class="mb-1">Agent Folders</h3>
+    <div id="agent-folders" class="mb-1 text-dim">—</div>
+</div>
+
+<!-- Files -->
+<div class="tab-content" id="tab-files">
+    <div class="file-browser">
+        <div class="file-tree" id="file-tree">Loading…</div>
+        <div class="file-viewer">
+            <div class="text-dim text-sm mb-1" id="file-path">Select a file</div>
+            <pre><code id="file-content"></code></pre>
+        </div>
+    </div>
+</div>
+
+<!-- Runs -->
+<div class="tab-content" id="tab-runs">
+    <div id="runs-table">Loading…</div>
+    <div class="pagination" id="runs-pagination"></div>
+    <div class="mt-1">
+        <div id="log-viewer-section" style="display:none">
+            <h3 class="mb-1">Log Output</h3>
+            <div class="log-viewer" id="log-viewer"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Schedules -->
+<div class="tab-content" id="tab-schedules">
+    <button class="btn btn-primary mb-1" onclick="openSchedModal()">New Schedule</button>
+    <div id="schedules-table">Loading…</div>
+</div>
+
+<!-- Danger Zone -->
+<div class="tab-content" id="tab-danger">
+    <div class="danger-zone">
+        <h3>Delete Agent</h3>
+        <p class="text-dim text-sm mb-1">This will permanently remove the agent, all run history, schedules, and uploaded files. This cannot be undone.</p>
+        <button class="btn btn-danger" onclick="deleteAgent()">Delete This Agent</button>
+    </div>
+</div>
+
+<!-- Run Modal -->
+<div class="modal-overlay" id="run-modal">
+    <div class="modal">
+        <h2>Run Agent</h2>
+        <div id="run-form-body">
+            <div class="form-group">
+                <label>Arguments (JSON)</label>
+                <textarea id="run-args" rows="4" placeholder='{"key": "value"}'>{}</textarea>
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal('run-modal')">Cancel</button>
+            <button class="btn btn-primary" onclick="runAgent()">Run</button>
+        </div>
+    </div>
+</div>
+
+<!-- Schedule Modal (used for both Create and Edit) -->
+<div class="modal-overlay" id="schedule-modal">
+    <div class="modal">
+        <h2 id="sched-modal-title">Create Schedule</h2>
+        <div class="form-group">
+            <label>Type</label>
+            <select id="sched-type" onchange="toggleSchedFields()">
+                <option value="cron">Cron</option>
+                <option value="interval">Interval</option>
+                <option value="once">One-time</option>
+            </select>
+        </div>
+        <div class="form-group" id="sched-cron-group">
+            <label>Cron Expression</label>
+            <input type="text" id="sched-cron" placeholder="0 9 * * 1">
+        </div>
+        <div class="form-group" id="sched-interval-group" style="display:none">
+            <label>Interval (seconds)</label>
+            <input type="number" id="sched-interval" value="3600">
+        </div>
+        <div class="form-group" id="sched-once-group" style="display:none">
+            <label>Run At (ISO datetime)</label>
+            <input type="datetime-local" id="sched-runat">
+        </div>
+        <div class="form-group">
+            <label>Arguments (JSON)</label>
+            <textarea id="sched-args" rows="2">{}</textarea>
+        </div>
+        <div class="modal-actions">
+            <button class="btn btn-outline" onclick="closeModal('schedule-modal')">Cancel</button>
+            <button class="btn btn-primary" id="sched-submit-btn" onclick="saveSchedule()">Create</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const AGENT_ID = '{{ agent_id }}';
+let currentRunsPage = 1;
+let _buildPollInterval = null;
+let _runConfig = null;
+let _editingSchedId = null;
+
+function buildRunForm(runConfig) {
+    const body = document.getElementById('run-form-body');
+    if (!runConfig || !runConfig.fields || !runConfig.fields.length) {
+        body.innerHTML = `<div class="form-group">
+            <label>Arguments (JSON)</label>
+            <textarea id="run-args" rows="4" placeholder='{"key": "value"}'>{}</textarea>
+        </div>`;
+        return;
+    }
+
+    _runConfig = runConfig;
+    let html = '';
+    for (const field of runConfig.fields) {
+        html += `<div class="form-group">`;
+        html += `<label>${field.label || field.name}`;
+        if (field.max_words) html += ` <span id="wc-${field.name}" class="text-dim text-sm" style="margin-left:.5rem">0 / ${field.max_words} words</span>`;
+        html += `</label>`;
+
+        if (field.type === 'textarea') {
+            html += `<textarea id="run-field-${field.name}" rows="${field.rows || 4}"
+                placeholder="${field.placeholder || ''}"
+                ${field.required ? 'required' : ''}
+                oninput="updateWordCount('${field.name}', ${field.max_words || 0})"></textarea>`;
+        } else if (field.type === 'select' && field.options) {
+            html += `<select id="run-field-${field.name}">`;
+            for (const opt of field.options) {
+                html += `<option value="${opt.value || opt}">${opt.label || opt}</option>`;
+            }
+            html += `</select>`;
+        } else if (field.type === 'number') {
+            html += `<input type="number" id="run-field-${field.name}" placeholder="${field.placeholder || ''}" ${field.required ? 'required' : ''}>`;
+        } else {
+            html += `<input type="text" id="run-field-${field.name}" placeholder="${field.placeholder || ''}" ${field.required ? 'required' : ''}>`;
+        }
+        html += `</div>`;
+    }
+    body.innerHTML = html;
+}
+
+function updateWordCount(name, maxWords) {
+    if (!maxWords) return;
+    const el = document.getElementById(`run-field-${name}`);
+    const wcEl = document.getElementById(`wc-${name}`);
+    if (!el || !wcEl) return;
+    const words = el.value.trim() ? el.value.trim().split(/\s+/).length : 0;
+    wcEl.textContent = `${words} / ${maxWords} words`;
+    wcEl.style.color = words > maxWords ? 'var(--danger)' : '';
+}
+
+async function loadAgent() {
+    const res = await API.get(`/api/agents/${AGENT_ID}`);
+    if (!res.success) { toast(res.error, 'error'); return; }
+    const a = res.data;
+    document.getElementById('agent-name').textContent = a.name;
+    buildRunForm(a.run_config || null);
+
+    const isBuilding = !a.venv_ready && a.status !== 'error';
+    const displayStatus = a.venv_ready ? a.status : (a.status === 'error' ? 'error' : 'building');
+
+    document.getElementById('agent-status-bar').innerHTML = `
+        ${statusBadge(displayStatus)}
+        <span class="text-dim text-sm" style="margin-left:.5rem">ID: ${a._id}</span>
+        ${(!a.venv_ready && a.status === 'error') ? `<button class="btn btn-outline btn-sm" style="margin-left:.5rem" onclick="rebuildVenv()">Retry Build</button>` : ''}
+        ${isBuilding ? `<button class="btn btn-outline btn-sm" style="margin-left:.5rem" onclick="rebuildVenv()">Rebuild</button>` : ''}
+    `;
+    document.getElementById('overview-meta').innerHTML = `
+        <div class="stat-card"><div class="label">Runs</div><div class="value">${a.run_count || 0}</div></div>
+        <div class="stat-card"><div class="label">Last Run</div><div class="value text-sm">${fmtDate(a.last_run_at)}</div></div>
+        <div class="stat-card"><div class="label">Created</div><div class="value text-sm">${fmtDate(a.created_at)}</div></div>
+        <div class="stat-card"><div class="label">Venv</div><div class="value">${a.venv_ready ? 'Ready' : (a.status === 'error' ? 'Failed' : 'Building…')}</div></div>
+    `;
+    document.getElementById('detected-nodes').textContent = a.detected_nodes?.length ? a.detected_nodes.join(', ') : '—';
+    document.getElementById('detected-tools').textContent = a.detected_tools?.length ? a.detected_tools.join(', ') : '—';
+    document.getElementById('agent-folders').textContent = a.agent_folders?.length ? a.agent_folders.join(', ') : '—';
+
+    if (isBuilding && !_buildPollInterval) {
+        _buildPollInterval = setInterval(loadAgent, 5000);
+    } else if (!isBuilding && _buildPollInterval) {
+        clearInterval(_buildPollInterval);
+        _buildPollInterval = null;
+        if (a.venv_ready) toast('Venv build complete', 'success');
+    }
+}
+
+async function rebuildVenv() {
+    const res = await API.post(`/api/agents/${AGENT_ID}/rebuild`);
+    if (res.success) { toast('Rebuild started', 'success'); loadAgent(); }
+    else toast(res.error, 'error');
+}
+
+async function loadFileTree() {
+    const res = await API.get(`/api/agents/${AGENT_ID}/files`);
+    if (!res.success) return;
+    document.getElementById('file-tree').innerHTML = renderTree(res.data, '');
+}
+
+function renderTree(node, path) {
+    let html = '';
+    for (const [name, value] of Object.entries(node)) {
+        const fullPath = path ? `${path}/${name}` : name;
+        if (value === null) {
+            html += `<div class="file-tree-item" style="padding-left:${path.split('/').length * 12}px"
+                          onclick="loadFile('${fullPath}')">${name}</div>`;
+        } else {
+            html += `<div class="file-tree-item file-tree-dir" style="padding-left:${path.split('/').length * 12}px">${name}/</div>`;
+            html += renderTree(value, fullPath);
+        }
+    }
+    return html;
+}
+
+async function loadFile(path) {
+    document.querySelectorAll('.file-tree-item').forEach(i => i.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('file-path').textContent = path;
+    const res = await API.get(`/api/agents/${AGENT_ID}/files/${path}`);
+    if (res.success) {
+        const codeEl = document.getElementById('file-content');
+        codeEl.textContent = res.data.content;
+        codeEl.className = '';
+        hljs.highlightElement(codeEl);
+    }
+}
+
+async function loadRuns(page) {
+    currentRunsPage = page || 1;
+    const res = await API.get(`/api/agents/${AGENT_ID}/runs?page=${currentRunsPage}`);
+    if (!res.success) return;
+    const {runs, total, page_size} = res.data;
+    const totalPages = Math.ceil(total / page_size);
+
+    if (!runs.length) {
+        document.getElementById('runs-table').innerHTML = '<p class="text-dim">No runs yet.</p>';
+        return;
+    }
+    document.getElementById('runs-table').innerHTML = `<table>
+        <thead><tr><th>Run ID</th><th>Status</th><th>Triggered</th><th>Duration</th><th>Started</th><th></th></tr></thead>
+        <tbody>${runs.map(r => `
+            <tr>
+                <td class="mono text-sm">${r._id.substring(0,8)}…</td>
+                <td>${statusBadge(r.status)}</td>
+                <td>${r.triggered_by}</td>
+                <td>${fmtDuration(r.duration_seconds)}</td>
+                <td class="text-dim">${fmtDate(r.start_time)}</td>
+                <td>
+                    <button class="btn btn-outline btn-sm" onclick="viewLog('${r._id}')">Logs</button>
+                    ${r.status === 'running' ? `<button class="btn btn-danger btn-sm" onclick="stopRun('${r._id}')">Stop</button>` : ''}
+                </td>
+            </tr>
+        `).join('')}</tbody>
+    </table>`;
+
+    let pag = '';
+    for (let i = 1; i <= totalPages; i++) {
+        pag += `<button class="${i === currentRunsPage ? 'active' : ''}" onclick="loadRuns(${i})">${i}</button>`;
+    }
+    document.getElementById('runs-pagination').innerHTML = pag;
+}
+
+async function viewLog(runId) {
+    const section = document.getElementById('log-viewer-section');
+    section.style.display = 'block';
+    const viewer = document.getElementById('log-viewer');
+    viewer.textContent = 'Loading…';
+
+    const res = await API.get(`/api/runs/${runId}/logs`);
+    viewer.textContent = res.success ? (res.data.logs || '(empty)') : res.error;
+
+    // If run is active, connect WebSocket for live tail
+    const runRes = await API.get(`/api/runs/${runId}`);
+    if (runRes.success && runRes.data.status === 'running') {
+        connectWS(`/ws/logs/${runId}`, (data) => {
+            if (data.type === 'log') {
+                viewer.textContent += '\n' + data.line;
+                viewer.scrollTop = viewer.scrollHeight;
+            }
+        });
+    }
+}
+
+async function stopRun(runId) {
+    const res = await API.post(`/api/runs/${runId}/stop`);
+    toast(res.success ? 'Run stopped' : res.error, res.success ? 'success' : 'error');
+    loadRuns(currentRunsPage);
+    loadAgent();
+}
+
+async function runAgent() {
+    let args = {};
+
+    if (_runConfig && _runConfig.fields && _runConfig.fields.length) {
+        for (const field of _runConfig.fields) {
+            const el = document.getElementById(`run-field-${field.name}`);
+            if (!el) continue;
+            const val = el.value.trim();
+            if (field.required && !val) {
+                toast(`"${field.label || field.name}" is required`, 'error');
+                return;
+            }
+            if (field.max_words && val) {
+                const wc = val.split(/\s+/).length;
+                if (wc > field.max_words) {
+                    toast(`"${field.label || field.name}" exceeds ${field.max_words} words (has ${wc})`, 'error');
+                    return;
+                }
+            }
+            args[field.name] = field.type === 'number' ? Number(val) : val;
+        }
+    } else {
+        try { args = JSON.parse(document.getElementById('run-args').value); } catch { toast('Invalid JSON', 'error'); return; }
+    }
+
+    const res = await API.post(`/api/agents/${AGENT_ID}/run`, {args});
+    if (res.success) {
+        toast('Agent started', 'success');
+        closeModal('run-modal');
+        loadRuns(1);
+        loadAgent();
+    } else {
+        toast(res.error, 'error');
+    }
+}
+
+async function loadSchedules() {
+    const res = await API.get(`/api/schedules/agent/${AGENT_ID}`);
+    if (!res.success) return;
+    const scheds = res.data;
+    if (!scheds.length) {
+        document.getElementById('schedules-table').innerHTML = '<p class="text-dim">No schedules.</p>';
+        return;
+    }
+    document.getElementById('schedules-table').innerHTML = `<table>
+        <thead><tr><th>Type</th><th>Config</th><th>Next Run</th><th>Enabled</th><th></th></tr></thead>
+        <tbody>${scheds.map(s => `
+            <tr>
+                <td>${s.schedule_type}</td>
+                <td class="mono text-sm">${s.cron_expression || (s.interval_seconds ? s.interval_seconds+'s' : fmtDate(s.run_at))}</td>
+                <td class="text-dim">${fmtDate(s.next_run_at)}</td>
+                <td>
+                    <label class="toggle">
+                        <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSched('${s._id}')">
+                        <span class="slider"></span>
+                    </label>
+                </td>
+                <td class="flex gap-sm">
+                    <button class="btn btn-outline btn-sm" onclick="editSched('${s._id}')">Edit</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteSched('${s._id}')">Delete</button>
+                </td>
+            </tr>
+        `).join('')}</tbody>
+    </table>`;
+}
+
+function toggleSchedFields() {
+    const t = document.getElementById('sched-type').value;
+    document.getElementById('sched-cron-group').style.display = t === 'cron' ? '' : 'none';
+    document.getElementById('sched-interval-group').style.display = t === 'interval' ? '' : 'none';
+    document.getElementById('sched-once-group').style.display = t === 'once' ? '' : 'none';
+}
+
+function openSchedModal(editId = null) {
+    _editingSchedId = editId;
+    document.getElementById('sched-modal-title').textContent = editId ? 'Edit Schedule' : 'Create Schedule';
+    document.getElementById('sched-submit-btn').textContent = editId ? 'Save' : 'Create';
+    if (!editId) {
+        document.getElementById('sched-type').value = 'cron';
+        document.getElementById('sched-cron').value = '';
+        document.getElementById('sched-interval').value = '3600';
+        document.getElementById('sched-runat').value = '';
+        document.getElementById('sched-args').value = '{}';
+        toggleSchedFields();
+    }
+    openModal('schedule-modal');
+}
+
+async function editSched(id) {
+    const res = await API.get(`/api/schedules/agent/${AGENT_ID}`);
+    if (!res.success) return;
+    const sched = res.data.find(s => s._id === id);
+    if (!sched) { toast('Schedule not found', 'error'); return; }
+
+    document.getElementById('sched-type').value = sched.schedule_type;
+    document.getElementById('sched-cron').value = sched.cron_expression || '';
+    document.getElementById('sched-interval').value = sched.interval_seconds || 3600;
+    document.getElementById('sched-args').value = JSON.stringify(sched.args || {});
+
+    if (sched.run_at) {
+        const d = new Date(sched.run_at);
+        const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+        document.getElementById('sched-runat').value = local;
+    } else {
+        document.getElementById('sched-runat').value = '';
+    }
+
+    toggleSchedFields();
+    openSchedModal(id);
+}
+
+async function saveSchedule() {
+    const t = document.getElementById('sched-type').value;
+    let args = {};
+    try { args = JSON.parse(document.getElementById('sched-args').value); } catch { toast('Invalid JSON', 'error'); return; }
+
+    if (_editingSchedId) {
+        const body = { schedule_type: t, args };
+        if (t === 'cron') body.cron_expression = document.getElementById('sched-cron').value;
+        if (t === 'interval') body.interval_seconds = parseInt(document.getElementById('sched-interval').value);
+        if (t === 'once') body.run_at = new Date(document.getElementById('sched-runat').value).toISOString();
+
+        const res = await API.put(`/api/schedules/${_editingSchedId}`, body);
+        if (res.success) { toast('Schedule updated', 'success'); closeModal('schedule-modal'); loadSchedules(); }
+        else toast(res.error, 'error');
+    } else {
+        const body = { agent_id: AGENT_ID, schedule_type: t, args };
+        if (t === 'cron') body.cron_expression = document.getElementById('sched-cron').value;
+        if (t === 'interval') body.interval_seconds = parseInt(document.getElementById('sched-interval').value);
+        if (t === 'once') body.run_at = new Date(document.getElementById('sched-runat').value).toISOString();
+
+        const res = await API.post('/api/schedules', body);
+        if (res.success) { toast('Schedule created', 'success'); closeModal('schedule-modal'); loadSchedules(); }
+        else toast(res.error, 'error');
+    }
+    _editingSchedId = null;
+}
+
+async function toggleSched(id) {
+    await API.post(`/api/schedules/${id}/toggle`);
+    loadSchedules();
+}
+
+async function deleteSched(id) {
+    if (!confirm('Delete this schedule?')) return;
+    await API.del(`/api/schedules/${id}`);
+    loadSchedules();
+}
+
+async function deleteAgent() {
+    if (!confirm('Are you sure you want to permanently delete this agent and all its data?')) return;
+    const res = await API.del(`/api/agents/${AGENT_ID}`);
+    if (res.success) { toast('Agent deleted', 'success'); location.href = '/'; }
+    else toast(res.error, 'error');
+}
+
+loadAgent();
+loadFileTree();
+loadRuns(1);
+loadSchedules();
+</script>
+{% endblock %}

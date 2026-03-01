@@ -1,0 +1,6 @@
+name: agent_a
+role: summarizer
+description: Receives text input (max 500 words), summarises it using Gemini, and stores results in MongoDB
+model: llama-3.3-70b-versatile
+temperature: 0.3
+max_tokens: 2048

@@ -1,0 +1,351 @@
+"""Agent lifecycle manager — registration, CRUD, source analysis."""
+
+import ast
+import io
+import logging
+import os
+import re
+import shutil
+import zipfile
+from pathlib import Path
+from typing import Any
+from uuid import uuid4
+
+import yaml
+
+from agent_platform.config import settings
+from agent_platform.core.validator import validate_agent_zip, validate_zip_security
+from agent_platform.db.client import get_database
+from agent_platform.db.repositories.agent_repo import AgentRepository
+from agent_platform.db.repositories.relationship_repo import RelationshipRepository
+from agent_platform.db.repositories.run_repo import RunRepository
+from agent_platform.db.repositories.schedule_repo import ScheduleRepository
+
+logger = logging.getLogger(__name__)
+
+
+def _repos():
+    db = get_database()
+    return (
+        AgentRepository(db),
+        RunRepository(db),
+        ScheduleRepository(db),
+        RelationshipRepository(db),
+    )
+
+
+# ── Source analysis via Python AST ──
+
+
+def _detect_nodes_and_tools(source_dir: Path) -> tuple[list[str], list[str]]:
+    """Walk all .py files and extract LangGraph node names and @tool functions."""
+    nodes: list[str] = []
+    tools: list[str] = []
+
+    for py_file in source_dir.rglob("*.py"):
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+
+        for node in ast.walk(tree):
+            # Detect graph.add_node("node_name", ...) calls
+            if isinstance(node, ast.Call):
+                func = node.func
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "add_node"
+                    and node.args
+                ):
+                    first_arg = node.args[0]
+                    if isinstance(first_arg, ast.Constant) and isinstance(
+                        first_arg.value, str
+                    ):
+                        nodes.append(first_arg.value)
+
+            # Detect @tool decorated functions
+            if isinstance(node, ast.FunctionDef):
+                for dec in node.decorator_list:
+                    dec_name = None
+                    if isinstance(dec, ast.Name):
+                        dec_name = dec.id
+                    elif isinstance(dec, ast.Attribute):
+                        dec_name = dec.attr
+                    if dec_name == "tool":
+                        tools.append(node.name)
+
+    return nodes, tools
+
+
+def _detect_inter_agent_refs(
+    source_dir: Path, agent_folders: list[str]
+) -> list[dict[str, str]]:
+    """Scan source files for cross-agent imports and references."""
+    refs: list[dict[str, str]] = []
+    folder_set = set(agent_folders)
+
+    for py_file in source_dir.rglob("*.py"):
+        try:
+            content = py_file.read_text(encoding="utf-8", errors="replace")
+            tree = ast.parse(content)
+        except SyntaxError:
+            continue
+
+        owning_agent = None
+        rel_parts = py_file.relative_to(source_dir).parts
+        if rel_parts and rel_parts[0] in folder_set:
+            owning_agent = rel_parts[0]
+        elif rel_parts and rel_parts[0] == "orchestrator":
+            owning_agent = "orchestrator"
+
+        for node in ast.walk(tree):
+            # import agent_alpha.something or from agent_beta import ...
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                module = None
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    module = node.module
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        module = alias.name
+                        _check_ref(module, owning_agent, folder_set, refs, "imports")
+                    continue
+                if module:
+                    _check_ref(module, owning_agent, folder_set, refs, "imports")
+
+        # Regex fallback for string-based references like "agent_alpha"
+        for other in folder_set:
+            if owning_agent and other != owning_agent:
+                if re.search(rf"\b{re.escape(other)}\b", content):
+                    ref = {"source": owning_agent or "unknown", "target": other, "type": "calls"}
+                    if ref not in refs:
+                        refs.append(ref)
+
+    return refs
+
+
+def _check_ref(
+    module: str | None,
+    owning: str | None,
+    folder_set: set[str],
+    refs: list[dict[str, str]],
+    rel_type: str,
+) -> None:
+    if module is None:
+        return
+    top = module.split(".")[0]
+    if top in folder_set and top != owning:
+        ref = {"source": owning or "unknown", "target": top, "type": rel_type}
+        if ref not in refs:
+            refs.append(ref)
+
+
+def _build_source_structure(base: Path) -> dict[str, Any]:
+    """Build a nested dict representing the file tree for the UI file browser."""
+    structure: dict[str, Any] = {}
+    for item in sorted(base.rglob("*")):
+        rel = item.relative_to(base)
+        parts = rel.parts
+        node = structure
+        for part in parts[:-1]:
+            node = node.setdefault(part, {})
+        if item.is_file():
+            node[parts[-1]] = None  # leaf
+        else:
+            node.setdefault(parts[-1], {})
+    return structure
+
+
+def _parse_agent_configs(base: Path, agent_folders: list[str]) -> dict[str, Any]:
+    """Read config.yaml from each agent folder."""
+    configs: dict[str, Any] = {}
+    for folder in agent_folders:
+        cfg_path = base / folder / "config.yaml"
+        if cfg_path.exists():
+            try:
+                with open(cfg_path, "r") as f:
+                    configs[folder] = yaml.safe_load(f) or {}
+            except Exception:
+                configs[folder] = {}
+    return configs
+
+
+def _parse_run_config(base: Path) -> dict[str, Any] | None:
+    """Read run_config.json from the agent root if it exists.
+
+    This allows each agent team to define a custom input form for the Run modal
+    instead of the default raw-JSON textarea.
+    """
+    import json
+
+    cfg_path = base / "run_config.json"
+    if not cfg_path.exists():
+        return None
+    try:
+        with open(cfg_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        logger.warning("Failed to parse run_config.json in %s", base)
+        return None
+
+
+def _strip_env_secrets(env_path: Path) -> None:
+    """Remove actual secret values from an uploaded .env file, keeping keys."""
+    if not env_path.exists():
+        return
+    lines = env_path.read_text().splitlines()
+    cleaned: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0]
+            cleaned.append(f"{key}=PLATFORM_MANAGED")
+        else:
+            cleaned.append(line)
+    env_path.write_text("\n".join(cleaned) + "\n")
+
+
+# ── Public API ──
+
+
+async def register_agent(
+    file_bytes: bytes,
+    filename: str,
+    name: str | None = None,
+    description: str = "",
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Validate, extract, analyse, and register an uploaded agent zip."""
+    validation = validate_agent_zip(file_bytes)
+    if not validation.valid:
+        raise ValueError("; ".join(validation.errors))
+
+    agent_id = str(uuid4())
+    store = Path(settings.AGENTS_STORE_PATH) / agent_id
+    store.mkdir(parents=True, exist_ok=True)
+
+    zf = zipfile.ZipFile(io.BytesIO(file_bytes))
+
+    # Zip-slip protection before extraction
+    offenders = validate_zip_security(zf, str(store))
+    if offenders:
+        shutil.rmtree(store, ignore_errors=True)
+        raise ValueError(
+            f"Zip contains path-traversal entries (zip-slip): {offenders[:5]}"
+        )
+
+    zf.extractall(store)
+
+    # The extracted content lives under store/<root_folder>/
+    root_dir = store / validation.root_folder
+
+    _strip_env_secrets(root_dir / ".env")
+
+    source_structure = _build_source_structure(root_dir)
+    detected_nodes, detected_tools = _detect_nodes_and_tools(root_dir)
+    agent_configs = _parse_agent_configs(root_dir, validation.agent_folders)
+    run_config = _parse_run_config(root_dir)
+
+    agent_repo, *_ = _repos()
+
+    agent_name = name or validation.root_folder
+    agent_doc: dict[str, Any] = {
+        "_id": agent_id,
+        "name": agent_name,
+        "description": description,
+        "tags": tags or [],
+        "root_folder": validation.root_folder,
+        "entry_point": "orchestrator/main.py",
+        "agent_folders": validation.agent_folders,
+        "has_orchestrator": True,
+        "upload_path": str(store),
+        "venv_path": str(store / ".venv"),
+        "source_structure": source_structure,
+        "detected_nodes": detected_nodes,
+        "detected_tools": detected_tools,
+    }
+    if run_config:
+        agent_doc["run_config"] = run_config
+    doc = await agent_repo.create(agent_doc)
+
+    # Store agent configs as part of the document
+    if agent_configs:
+        await agent_repo.update(agent_id, {"agent_configs": agent_configs})
+
+    # Tag management
+    rel_repo = RelationshipRepository(get_database())
+    for tag in tags or []:
+        await rel_repo.upsert_tag(tag, agent_id)
+
+    # Static analysis for inter-agent relationships
+    refs = _detect_inter_agent_refs(root_dir, validation.agent_folders)
+    if refs:
+        # These are intra-package references. We store them with the agent's own id
+        # as both source and target since they belong to the same upload.
+        await agent_repo.update(agent_id, {"internal_refs": refs})
+
+    logger.info("Agent %s registered (id=%s, agents=%s)", agent_name, agent_id, validation.agent_folders)
+    return doc
+
+
+async def get_agent(agent_id: str) -> dict[str, Any] | None:
+    agent_repo = AgentRepository(get_database())
+    return await agent_repo.get_by_id(agent_id)
+
+
+async def list_agents(
+    status: str | None = None,
+    tags: list[str] | None = None,
+    name: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict[str, Any]]:
+    agent_repo = AgentRepository(get_database())
+    return await agent_repo.list_all(status=status, tags=tags, name=name, date_from=date_from, date_to=date_to)
+
+
+async def delete_agent(agent_id: str) -> bool:
+    agent_repo, run_repo, schedule_repo, rel_repo = _repos()
+
+    agent = await agent_repo.get_by_id(agent_id)
+    if not agent:
+        return False
+
+    # Remove disk files
+    upload_path = agent.get("upload_path", "")
+    if upload_path and os.path.isdir(upload_path):
+        shutil.rmtree(upload_path, ignore_errors=True)
+
+    # Cascade-delete related documents
+    await schedule_repo.delete_by_agent(agent_id)
+    await rel_repo.delete_by_agent(agent_id)
+    await rel_repo.remove_agent_from_tags(agent_id)
+    await agent_repo.delete(agent_id)
+
+    logger.info("Agent %s deleted", agent_id)
+    return True
+
+
+def get_file_tree(agent_id: str) -> dict[str, Any] | None:
+    """Return a serialisable file tree dict for an agent's extracted folder."""
+    base = Path(settings.AGENTS_STORE_PATH) / agent_id
+    if not base.exists():
+        return None
+    return _build_source_structure(base)
+
+
+def get_file_content(agent_id: str, rel_path: str) -> str | None:
+    """Read a source file from the agent's extracted folder.
+
+    Returns None if the file doesn't exist or the path escapes the agent dir.
+    """
+    base = Path(settings.AGENTS_STORE_PATH) / agent_id
+    target = (base / rel_path).resolve()
+    # Guard against path traversal
+    if not str(target).startswith(str(base.resolve())):
+        return None
+    if not target.is_file():
+        return None
+    try:
+        return target.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None

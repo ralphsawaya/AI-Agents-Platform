@@ -1,0 +1,13 @@
+{
+    "fields": [
+        {
+            "name": "text",
+            "label": "Text Paragraph (max 500 words)",
+            "type": "textarea",
+            "placeholder": "Paste your text paragraph here...",
+            "required": true,
+            "rows": 10,
+            "max_words": 500
+        }
+    ]
+}

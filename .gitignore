@@ -1,0 +1,36 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Agent store (runtime data — venvs, logs, extracted uploads)
+agent_platform/agents_store/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment / credentials
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+agent_platform.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Zip artifacts (rebuilt via build_zip.py)
+*.zip

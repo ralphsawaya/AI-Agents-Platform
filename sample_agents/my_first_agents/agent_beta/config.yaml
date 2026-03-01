@@ -1,0 +1,6 @@
+name: agent_beta
+role: report_generator
+description: Receives a summary from agent_alpha and generates a structured report
+model: gpt-4o-mini
+temperature: 0.4
+max_tokens: 4096

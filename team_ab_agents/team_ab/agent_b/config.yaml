@@ -1,0 +1,6 @@
+name: agent_b
+role: title_writer
+description: Receives a summary from AgentA and generates a title using Gemini, then stores it in MongoDB
+model: llama-3.3-70b-versatile
+temperature: 0.4
+max_tokens: 256

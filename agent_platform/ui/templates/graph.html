@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Relationship Graph — AI Agent Platform{% endblock %}
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js"></script>
+{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Agent Relationship Graph</h1>
+</div>
+
+<div class="graph-controls">
+    <label class="text-dim text-sm">Layout:</label>
+    <select id="layout-select" onchange="changeLayout(this.value)">
+        <option value="breadthfirst">Hierarchical</option>
+        <option value="cose" selected>Force-Directed</option>
+        <option value="circle">Circular</option>
+    </select>
+</div>
+
+<div id="cy"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let cy;
+
+const STATUS_COLORS = {
+    idle: '#71717a',
+    running: '#3b82f6',
+    scheduled: '#06b6d4',
+    error: '#ef4444',
+    building: '#f59e0b',
+};
+
+const EDGE_COLORS = {
+    calls: '#3b82f6',
+    imports: '#06b6d4',
+    delegates: '#22c55e',
+};
+
+async function loadGraph() {
+    const res = await API.get('/api/graph');
+    if (!res.success) { toast(res.error, 'error'); return; }
+
+    const {nodes, edges} = res.data;
+
+    const elements = [];
+
+    nodes.forEach(n => {
+        elements.push({
+            data: {
+                id: n.id || n._id,
+                label: n.name,
+                status: n.status,
+                agentFolders: (n.agent_folders || []).join(', '),
+            },
+        });
+    });
+
+    edges.forEach(e => {
+        elements.push({
+            data: {
+                id: e._id,
+                source: e.source_agent_id,
+                target: e.target_agent_id,
+                relType: e.relationship_type,
+                detectedVia: e.detected_via,
+                confidence: e.confidence,
+            },
+        });
+    });
+
+    cy = cytoscape({
+        container: document.getElementById('cy'),
+        elements,
+        style: [
+            {
+                selector: 'node',
+                style: {
+                    'label': 'data(label)',
+                    'text-valign': 'center',
+                    'color': '#fafafa',
+                    'font-size': '12px',
+                    'background-color': function(ele) {
+                        return STATUS_COLORS[ele.data('status')] || '#71717a';
+                    },
+                    'border-width': 2,
+                    'border-color': '#2a2a32',
+                    'width': 50,
+                    'height': 50,
+                },
+            },
+            {
+                selector: 'edge',
+                style: {
+                    'width': 2,
+                    'line-color': function(ele) {
+                        return EDGE_COLORS[ele.data('relType')] || '#3b82f6';
+                    },
+                    'target-arrow-color': function(ele) {
+                        return EDGE_COLORS[ele.data('relType')] || '#3b82f6';
+                    },
+                    'target-arrow-shape': 'triangle',
+                    'curve-style': 'bezier',
+                    'label': 'data(relType)',
+                    'font-size': '10px',
+                    'color': '#71717a',
+                    'text-rotation': 'autorotate',
+                },
+            },
+        ],
+        layout: { name: 'cose', animate: true },
+    });
+
+    // Click node to navigate to agent detail
+    cy.on('tap', 'node', function(evt) {
+        const id = evt.target.data('id');
+        if (id && !id.includes(':')) {
+            location.href = `/agents/${id}`;
+        }
+    });
+
+    // Edge tooltip
+    cy.on('mouseover', 'edge', function(evt) {
+        const e = evt.target.data();
+        evt.target.style('label', `${e.relType} (${e.detectedVia}, ${(e.confidence * 100).toFixed(0)}%)`);
+    });
+
+    cy.on('mouseout', 'edge', function(evt) {
+        evt.target.style('label', evt.target.data('relType'));
+    });
+}
+
+function changeLayout(name) {
+    if (cy) {
+        cy.layout({ name, animate: true, spacingFactor: 1.5 }).run();
+    }
+}
+
+loadGraph();
+</script>
+{% endblock %}
