@@ -7,10 +7,20 @@
 
 <div id="alerts-area"></div>
 
-<table id="monitor-table">
+<table id="monitor-table" style="table-layout:fixed;width:100%">
+    <colgroup>
+        <col style="width:14%">  <!-- Agents Team -->
+        <col style="width:11%">  <!-- Run ID -->
+        <col style="width:7%">   <!-- PID -->
+        <col style="width:7%">   <!-- CPU % -->
+        <col style="width:11%">  <!-- Memory (MB) -->
+        <col style="width:8%">   <!-- Elapsed -->
+        <col style="width:30%">  <!-- Last Log -->
+        <col style="width:12%">  <!-- Actions -->
+    </colgroup>
     <thead>
         <tr>
-            <th>Agent</th>
+            <th>Agents Team</th>
             <th>Run ID</th>
             <th>PID</th>
             <th>CPU %</th>
@@ -20,7 +30,7 @@
             <th></th>
         </tr>
     </thead>
-    <tbody id="monitor-body">
+    <tbody id="monitor-body" style="min-height:3rem">
         <tr><td colspan="8" class="text-dim">No agents running.</td></tr>
     </tbody>
 </table>
@@ -102,6 +112,7 @@ const monitorWs = connectWS('/ws/monitor', (data) => {
 
 loadRunning();
 loadAlerts();
-setInterval(loadRunning, 5000);
+setInterval(loadRunning, 20000);
+setInterval(loadAlerts, 30000);
 </script>
 {% endblock %}

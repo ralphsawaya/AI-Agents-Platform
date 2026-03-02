@@ -94,12 +94,17 @@ async def execute_agent(
     env["AGENT_RUN_ID"] = run_id
     env["AGENT_ARGS"] = json.dumps(args or {})
 
+    # Forward API keys from platform settings into the agent subprocess environment
+    if settings.groq_api_key:
+        env["GROQ_API_KEY"] = settings.groq_api_key
+
     timeout = agent.get("timeout_seconds", settings.DEFAULT_TIMEOUT_SECONDS)
 
     # Fire-and-forget: the streaming task runs in background
     asyncio.create_task(_run_subprocess(
         run_id=run_id,
         agent_id=agent_id,
+        agent_name=agent.get("name", "unknown"),
         venv_python=str(venv_python),
         entry_point=str(entry_point),
         cwd=str(root_dir),
@@ -114,6 +119,7 @@ async def execute_agent(
 async def _run_subprocess(
     run_id: str,
     agent_id: str,
+    agent_name: str,
     venv_python: str,
     entry_point: str,
     cwd: str,
@@ -141,6 +147,7 @@ async def _run_subprocess(
             "pid": proc.pid,
             "process": proc,
             "agent_id": agent_id,
+            "agent_name": agent_name,
             "start": start,
         }
 

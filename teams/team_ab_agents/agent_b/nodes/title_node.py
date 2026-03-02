@@ -1,5 +1,7 @@
 """Title node — uses Gemini LLM to generate a title from the summary."""
 
+import time
+
 from shared.llm import get_llm
 from shared.logger import get_logger
 from agent_b.prompts.prompt_templates import TITLE_TEMPLATE
@@ -18,5 +20,6 @@ def title_node(state: dict) -> dict:
     logger.info("Calling Gemini LLM for title generation…")
     title = llm.invoke(prompt).strip().strip('"').strip("'")
 
-    logger.info("Title generated: %s", title)
+    logger.info("Title generated: %s — post-processing (10s)…", title)
+    time.sleep(10)
     return {"title": title}

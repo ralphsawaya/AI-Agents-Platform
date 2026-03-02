@@ -1,142 +1,388 @@
 {% extends "base.html" %}
-{% block title %}Relationship Graph — AI Agent Platform{% endblock %}
+{% block title %}Pipeline Graph — AI Agent Platform{% endblock %}
 {% block head %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.4/cytoscape.min.js"></script>
 {% endblock %}
 {% block content %}
+
 <div class="page-header">
-    <h1>Agent Relationship Graph</h1>
+    <h1>Pipeline Graph</h1>
+    <div class="flex items-center gap-sm">
+        <select id="team-select" onchange="loadTeamGraph(this.value)" style="min-width:200px">
+            <option value="">Select a team…</option>
+        </select>
+        <select id="layout-select" onchange="changeLayout(this.value)" style="min-width:150px">
+            <option value="preset">Pipeline (L→R)</option>
+            <option value="breadthfirst">Hierarchical</option>
+            <option value="cose">Force-Directed</option>
+            <option value="circle">Circular</option>
+        </select>
+        <button class="btn btn-outline btn-sm" onclick="if(currentTeamId) loadTeamGraph(currentTeamId)">↺ Refresh</button>
+    </div>
 </div>
 
-<div class="graph-controls">
-    <label class="text-dim text-sm">Layout:</label>
-    <select id="layout-select" onchange="changeLayout(this.value)">
-        <option value="breadthfirst">Hierarchical</option>
-        <option value="cose" selected>Force-Directed</option>
-        <option value="circle">Circular</option>
-    </select>
+<div id="graph-layout">
+
+    <!-- Main canvas -->
+    <div id="cy-wrap">
+        <div id="cy-empty">
+            <div class="cy-empty-icon">⬡</div>
+            <p class="text-dim">Select a team above to visualise its agent pipeline</p>
+        </div>
+        <div id="cy" style="display:none"></div>
+
+        <!-- Floating legend -->
+        <div id="graph-legend" style="display:none">
+            <div class="legend-row"><span class="lnode lnode-orch"></span> Orchestrator</div>
+            <div class="legend-row"><span class="lnode lnode-agent"></span> Agent</div>
+            <div class="legend-row"><span class="ledge ledge-invoke">──▶</span> Invokes</div>
+            <div class="legend-row"><span class="ledge ledge-pipeline">╌╌▶</span> Pipeline</div>
+        </div>
+    </div>
+
+    <!-- Info panel -->
+    <div id="info-panel">
+
+        <!-- Empty state -->
+        <div id="info-empty" class="info-empty-state">
+            <div class="info-empty-icon">⬡</div>
+            <p class="text-dim text-sm" style="text-align:center">Select a team to see its pipeline</p>
+        </div>
+
+        <!-- Team overview -->
+        <div id="team-info" style="display:none">
+
+            <div class="info-section">
+                <div class="info-section-label">Team</div>
+                <div class="info-team-name" id="info-team-name">—</div>
+                <div style="margin-top:.4rem" id="info-team-status"></div>
+            </div>
+
+            <div class="info-stats-grid">
+                <div class="info-stat">
+                    <div class="info-stat-value" id="info-run-count">0</div>
+                    <div class="info-stat-label">Runs</div>
+                </div>
+                <div class="info-stat">
+                    <div class="info-stat-value" id="info-agent-count">0</div>
+                    <div class="info-stat-label">Agents</div>
+                </div>
+            </div>
+
+            <div class="info-section" id="tools-section" style="display:none">
+                <div class="info-section-label">Tools</div>
+                <div id="info-tools" class="pill-group" style="margin-top:.4rem"></div>
+            </div>
+
+            <div class="info-divider"></div>
+
+            <!-- Selected node detail (hidden until a node is clicked) -->
+            <div id="node-detail" style="display:none">
+                <div class="info-section">
+                    <div class="info-section-label">Selected Node</div>
+                    <div class="info-node-name" id="detail-label">—</div>
+                    <span class="info-type-badge" id="detail-type-badge">—</span>
+                </div>
+
+                <div class="info-section" id="detail-subnodes-wrap">
+                    <div class="info-section-label" id="detail-subnodes-title">Pipeline Nodes</div>
+                    <div id="detail-subnodes"></div>
+                </div>
+
+                <div class="info-divider"></div>
+            </div>
+
+            <!-- Legend -->
+            <div class="info-section">
+                <div class="info-section-label">Legend</div>
+                <div class="legend-panel-row">
+                    <span class="lnode lnode-orch"></span>
+                    <span>Orchestrator — coordinates all agents</span>
+                </div>
+                <div class="legend-panel-row">
+                    <span class="lnode lnode-agent"></span>
+                    <span>Agent — autonomous processing unit</span>
+                </div>
+                <div class="legend-panel-row">
+                    <span class="ledge ledge-invoke" style="font-size:.85rem">──▶</span>
+                    <span>Invokes — orchestrator calls agent</span>
+                </div>
+                <div class="legend-panel-row">
+                    <span class="ledge ledge-pipeline" style="font-size:.85rem">╌╌▶</span>
+                    <span>Pipeline — output passed to next agent</span>
+                </div>
+            </div>
+
+        </div>
+    </div>
 </div>
 
-<div id="cy"></div>
 {% endblock %}
-
 {% block scripts %}
 <script>
-let cy;
+let cy = null;
+let currentTeamId = null;
+let currentNodes = [];
 
-const STATUS_COLORS = {
-    idle: '#71717a',
-    running: '#3b82f6',
-    scheduled: '#06b6d4',
-    error: '#ef4444',
-    building: '#f59e0b',
-};
-
-const EDGE_COLORS = {
-    calls: '#3b82f6',
-    imports: '#06b6d4',
-    delegates: '#22c55e',
-};
-
-async function loadGraph() {
-    const res = await API.get('/api/graph');
-    if (!res.success) { toast(res.error, 'error'); return; }
-
-    const {nodes, edges} = res.data;
-
-    const elements = [];
-
-    nodes.forEach(n => {
-        elements.push({
-            data: {
-                id: n.id || n._id,
-                label: n.name,
-                status: n.status,
-                agentFolders: (n.agent_folders || []).join(', '),
-            },
-        });
+/* ── Load team list into selector ── */
+async function loadTeams() {
+    const res = await API.get('/api/agents');
+    if (!res.success) return;
+    const sel = document.getElementById('team-select');
+    sel.innerHTML = '<option value="">Select a team…</option>';
+    res.data.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a._id;
+        opt.textContent = a.name;
+        sel.appendChild(opt);
     });
+    if (res.data.length === 1) {
+        sel.value = res.data[0]._id;
+        loadTeamGraph(res.data[0]._id);
+    }
+}
 
-    edges.forEach(e => {
-        elements.push({
-            data: {
-                id: e._id,
-                source: e.source_agent_id,
-                target: e.target_agent_id,
-                relType: e.relationship_type,
-                detectedVia: e.detected_via,
-                confidence: e.confidence,
-            },
-        });
-    });
+/* ── Load and render graph for a team ── */
+async function loadTeamGraph(agentId) {
+    if (!agentId) return;
+    currentTeamId = agentId;
+
+    const res = await API.get(`/api/graph/team/${agentId}`);
+    if (!res.success) { toast(res.error || 'Failed to load graph', 'error'); return; }
+
+    const { team, nodes, edges } = res.data;
+    currentNodes = nodes;
+
+    /* Show panels */
+    document.getElementById('cy-empty').style.display    = 'none';
+    document.getElementById('cy').style.display           = 'block';
+    document.getElementById('graph-legend').style.display = 'block';
+    document.getElementById('info-empty').style.display   = 'none';
+    document.getElementById('team-info').style.display    = 'block';
+    document.getElementById('node-detail').style.display  = 'none';
+
+    /* Team info */
+    document.getElementById('info-team-name').textContent = team.name;
+    document.getElementById('info-team-status').innerHTML  = statusBadge(team.status);
+    document.getElementById('info-run-count').textContent  = team.run_count || 0;
+    document.getElementById('info-agent-count').textContent = (team.agent_folders || []).length;
+
+    const tools = team.detected_tools || [];
+    const toolsSec = document.getElementById('tools-section');
+    if (tools.length) {
+        toolsSec.style.display = '';
+        document.getElementById('info-tools').innerHTML =
+            tools.map(t => `<span class="pill pill-tool">${t}</span>`).join('');
+    } else {
+        toolsSec.style.display = 'none';
+    }
+
+    /* Build Cytoscape elements */
+    const elements = buildElements(nodes, edges);
+
+    if (cy) cy.destroy();
 
     cy = cytoscape({
         container: document.getElementById('cy'),
         elements,
-        style: [
-            {
-                selector: 'node',
-                style: {
-                    'label': 'data(label)',
-                    'text-valign': 'center',
-                    'color': '#fafafa',
-                    'font-size': '12px',
-                    'background-color': function(ele) {
-                        return STATUS_COLORS[ele.data('status')] || '#71717a';
-                    },
-                    'border-width': 2,
-                    'border-color': '#2a2a32',
-                    'width': 50,
-                    'height': 50,
-                },
-            },
-            {
-                selector: 'edge',
-                style: {
-                    'width': 2,
-                    'line-color': function(ele) {
-                        return EDGE_COLORS[ele.data('relType')] || '#3b82f6';
-                    },
-                    'target-arrow-color': function(ele) {
-                        return EDGE_COLORS[ele.data('relType')] || '#3b82f6';
-                    },
-                    'target-arrow-shape': 'triangle',
-                    'curve-style': 'bezier',
-                    'label': 'data(relType)',
-                    'font-size': '10px',
-                    'color': '#71717a',
-                    'text-rotation': 'autorotate',
-                },
-            },
-        ],
-        layout: { name: 'cose', animate: true },
+        style: cytoscapeStyle(),
+        layout: buildPresetLayout(nodes, edges),
+        minZoom: 0.3,
+        maxZoom: 2.5,
     });
 
-    // Click node to navigate to agent detail
-    cy.on('tap', 'node', function(evt) {
-        const id = evt.target.data('id');
-        if (id && !id.includes(':')) {
-            location.href = `/agents/${id}`;
+    /* Events */
+    cy.on('tap', 'node', evt => showNodeDetail(evt.target.data()));
+    cy.on('tap', evt => {
+        if (evt.target === cy) {
+            document.getElementById('node-detail').style.display = 'none';
+            cy.nodes().unselect();
         }
     });
-
-    // Edge tooltip
-    cy.on('mouseover', 'edge', function(evt) {
-        const e = evt.target.data();
-        evt.target.style('label', `${e.relType} (${e.detectedVia}, ${(e.confidence * 100).toFixed(0)}%)`);
-    });
-
-    cy.on('mouseout', 'edge', function(evt) {
-        evt.target.style('label', evt.target.data('relType'));
-    });
+    cy.on('layoutstop', () => cy.fit(undefined, 80));
 }
 
-function changeLayout(name) {
-    if (cy) {
-        cy.layout({ name, animate: true, spacingFactor: 1.5 }).run();
+/* ── Build elements array ── */
+function buildElements(nodes, edges) {
+    const els = [];
+    nodes.forEach(n => {
+        els.push({ data: {
+            id: n.id, label: n.label, type: n.type,
+            color: n.color || '#6366f1', sub_nodes: n.sub_nodes || [],
+        }});
+    });
+    edges.forEach((e, i) => {
+        els.push({ data: {
+            id: `e${i}`, source: e.source, target: e.target,
+            label: e.label || '', edgeType: e.type || 'pipeline',
+        }});
+    });
+    return els;
+}
+
+/* ── Preset layout: pipeline left → right ── */
+function buildPresetLayout(nodes, edges) {
+    const order = getPipelineOrder(nodes, edges);
+    const positions = {};
+    const spacingX = 240;
+    const centerY = 0;
+    order.forEach((id, i) => { positions[id] = { x: i * spacingX, y: centerY }; });
+    return { name: 'preset', positions, fit: true, padding: 80 };
+}
+
+function getPipelineOrder(nodes, edges) {
+    /* Follow edges starting from orchestrator */
+    const edgeMap = {};
+    edges.forEach(e => {
+        if (!edgeMap[e.source]) edgeMap[e.source] = [];
+        edgeMap[e.source].push(e.target);
+    });
+    const order = [];
+    const visited = new Set();
+    const queue = ['orchestrator'];
+    while (queue.length) {
+        const cur = queue.shift();
+        if (visited.has(cur)) continue;
+        visited.add(cur);
+        order.push(cur);
+        (edgeMap[cur] || []).forEach(t => { if (!visited.has(t)) queue.push(t); });
+    }
+    nodes.forEach(n => { if (!visited.has(n.id)) order.push(n.id); });
+    return order;
+}
+
+/* ── Cytoscape stylesheet ── */
+function cytoscapeStyle() {
+    return [
+        {
+            selector: 'node[type = "orchestrator"]',
+            style: {
+                shape: 'hexagon',
+                width: 100, height: 100,
+                'background-color': '#6366f1',
+                'border-color': '#818cf8', 'border-width': 2,
+                label: 'data(label)',
+                'text-valign': 'center', 'text-halign': 'center',
+                color: '#fff', 'font-size': '13px', 'font-weight': '600',
+                'text-wrap': 'wrap', 'text-max-width': '88px',
+            },
+        },
+        {
+            selector: 'node[type = "agent"]',
+            style: {
+                shape: 'round-rectangle',
+                width: 140, height: 72,
+                'background-color': 'data(color)',
+                'border-color': 'data(color)', 'border-width': 0,
+                label: 'data(label)',
+                'text-valign': 'center', 'text-halign': 'center',
+                color: '#fff', 'font-size': '12px', 'font-weight': '600',
+                'text-wrap': 'wrap', 'text-max-width': '130px',
+            },
+        },
+        {
+            selector: 'node:selected',
+            style: {
+                'border-width': 3, 'border-color': '#fff', 'border-opacity': 1,
+                'overlay-color': '#fff', 'overlay-padding': 6, 'overlay-opacity': 0.06,
+            },
+        },
+        {
+            selector: 'edge[edgeType = "invoke"]',
+            style: {
+                width: 2.5,
+                'line-color': '#818cf8',
+                'target-arrow-color': '#818cf8',
+                'target-arrow-shape': 'triangle',
+                'curve-style': 'bezier',
+                label: 'data(label)',
+                'font-size': '10px', color: '#a1a1aa',
+                'text-rotation': 'autorotate',
+                'text-background-color': '#09090b',
+                'text-background-opacity': 0.9,
+                'text-background-padding': '3px',
+                'text-border-color': '#2a2a32',
+                'text-border-width': 1, 'text-border-opacity': 1,
+            },
+        },
+        {
+            selector: 'edge[edgeType = "pipeline"]',
+            style: {
+                width: 2.5,
+                'line-color': '#38bdf8',
+                'target-arrow-color': '#38bdf8',
+                'target-arrow-shape': 'triangle',
+                'curve-style': 'bezier',
+                'line-style': 'dashed',
+                'line-dash-pattern': [8, 4],
+                label: 'data(label)',
+                'font-size': '10px', color: '#a1a1aa',
+                'text-rotation': 'autorotate',
+                'text-background-color': '#09090b',
+                'text-background-opacity': 0.9,
+                'text-background-padding': '3px',
+                'text-border-color': '#2a2a32',
+                'text-border-width': 1, 'text-border-opacity': 1,
+            },
+        },
+        {
+            selector: 'edge',
+            style: {
+                width: 2, 'line-color': '#3f3f46',
+                'target-arrow-color': '#3f3f46',
+                'target-arrow-shape': 'triangle',
+                'curve-style': 'bezier',
+            },
+        },
+    ];
+}
+
+/* ── Show node detail in info panel ── */
+function showNodeDetail(data) {
+    document.getElementById('node-detail').style.display = 'block';
+    document.getElementById('detail-label').textContent  = data.label;
+
+    const badge = document.getElementById('detail-type-badge');
+    badge.textContent  = data.type === 'orchestrator' ? 'Orchestrator' : 'Agent';
+    badge.className    = `info-type-badge info-type-${data.type}`;
+
+    const subnodes = data.sub_nodes || [];
+    const wrap  = document.getElementById('detail-subnodes-wrap');
+    const title = document.getElementById('detail-subnodes-title');
+    const div   = document.getElementById('detail-subnodes');
+
+    if (subnodes.length) {
+        wrap.style.display  = '';
+        title.textContent = data.type === 'orchestrator' ? 'Agents Controlled' : 'LangGraph Nodes';
+        div.innerHTML = subnodes.map((s, i) => `
+            <div class="subnode-row">
+                <span class="subnode-index">${i + 1}</span>
+                <span class="subnode-name">${s}</span>
+            </div>`).join('');
+    } else {
+        wrap.style.display = 'none';
     }
 }
 
-loadGraph();
+/* ── Layout switcher ── */
+function changeLayout(name) {
+    if (!cy) return;
+    let opts;
+    if (name === 'preset') {
+        opts = buildPresetLayout(currentNodes, []);
+        // rebuild from current edges too
+        const edges = [];
+        cy.edges().forEach(e => edges.push({ source: e.data('source'), target: e.data('target') }));
+        opts = buildPresetLayout(currentNodes, edges);
+    } else {
+        opts = {
+            name, animate: true, animationDuration: 500, spacingFactor: 2,
+            ...(name === 'breadthfirst' ? { directed: true } : {}),
+        };
+    }
+    cy.layout(opts).run();
+}
+
+loadTeams();
 </script>
 {% endblock %}

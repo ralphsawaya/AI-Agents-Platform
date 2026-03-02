@@ -156,6 +156,176 @@ async def record_runtime_edge(
     })
 
 
+def _get_folder_nodes(folder_path: Path) -> list[str]:
+    """Extract LangGraph add_node names from an agent folder's Python files."""
+    nodes: list[str] = []
+    seen: set[str] = set()
+    for py_file in folder_path.rglob("*.py"):
+        if "__pycache__" in str(py_file):
+            continue
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if (
+                    isinstance(func, ast.Attribute)
+                    and func.attr == "add_node"
+                    and node.args
+                ):
+                    first_arg = node.args[0]
+                    if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
+                        name = first_arg.value
+                        if name not in seen:
+                            seen.add(name)
+                            nodes.append(name)
+    return nodes
+
+
+def _get_orchestrator_pipeline_edges(
+    orch_path: Path, folder_set: set[str]
+) -> list[dict[str, str]]:
+    """Scan orchestrator files for add_edge calls to find agent-to-agent pipeline flow."""
+    edges: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for py_file in orch_path.rglob("*.py"):
+        if "__pycache__" in str(py_file):
+            continue
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Attribute) and func.attr == "add_edge":
+                    str_args = [
+                        a.value for a in node.args
+                        if isinstance(a, ast.Constant) and isinstance(a.value, str)
+                    ]
+                    if len(str_args) >= 2:
+                        src_m = _find_folder(str_args[0], folder_set)
+                        tgt_m = _find_folder(str_args[1], folder_set)
+                        if src_m and tgt_m and src_m != tgt_m and (src_m, tgt_m) not in seen:
+                            seen.add((src_m, tgt_m))
+                            edges.append({
+                                "source": src_m,
+                                "target": tgt_m,
+                                "label": "output → input",
+                                "type": "pipeline",
+                            })
+    return edges
+
+
+async def get_team_graph(agent_id: str) -> dict[str, Any]:
+    """Return the internal pipeline graph of a team for visualisation.
+
+    Produces an orchestrator node, one node per agent folder with its
+    LangGraph pipeline nodes, and edges derived from the orchestrator
+    add_edge calls and stored internal_refs.
+    """
+    db = get_database()
+    agent_repo = AgentRepository(db)
+
+    agent = await agent_repo.get_by_id(agent_id)
+    if not agent:
+        return {}
+
+    agent_folders: list[str] = agent.get("agent_folders", [])
+    internal_refs: list[dict[str, str]] = agent.get("internal_refs", [])
+
+    # Locate the extracted root dir
+    base = Path(agent["upload_path"])
+    root_dirs = [
+        d for d in base.iterdir()
+        if d.is_dir() and not d.name.startswith(".") and d.name != "logs"
+    ]
+    root_dir = root_dirs[0] if root_dirs else base
+
+    folder_set = set(agent_folders)
+
+    # Per-agent node lists
+    per_agent_nodes: dict[str, list[str]] = {}
+    for folder in agent_folders:
+        fp = root_dir / folder
+        if fp.exists():
+            per_agent_nodes[folder] = _get_folder_nodes(fp)
+
+    # Orchestrator-level add_edge calls → pipeline ordering
+    orch_path = root_dir / "orchestrator"
+    pipeline_edges = _get_orchestrator_pipeline_edges(orch_path, folder_set) if orch_path.exists() else []
+
+    # Build node list
+    agent_colors = ["#3b82f6", "#06b6d4", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444"]
+    nodes: list[dict[str, Any]] = [
+        {
+            "id": "orchestrator",
+            "label": "Orchestrator",
+            "type": "orchestrator",
+            "sub_nodes": agent_folders,
+            "description": "Coordinates and sequences all agents in the pipeline",
+        }
+    ]
+    for i, folder in enumerate(agent_folders):
+        nodes.append({
+            "id": folder,
+            "label": folder.replace("_", " ").title(),
+            "type": "agent",
+            "color": agent_colors[i % len(agent_colors)],
+            "sub_nodes": per_agent_nodes.get(folder, []),
+        })
+
+    # Build edge list — prefer scanned orchestrator edges; fall back to internal_refs
+    edges: list[dict[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+
+    # Orchestrator → each agent (from internal_refs or default)
+    agents_mentioned = {r["target"] for r in internal_refs if r.get("source") == "orchestrator"}
+    if not agents_mentioned:
+        agents_mentioned = set(agent_folders)
+    for folder in agent_folders:
+        if folder in agents_mentioned:
+            pair = ("orchestrator", folder)
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                edges.append({"source": "orchestrator", "target": folder, "label": "invokes", "type": "invoke"})
+
+    # Agent-to-agent pipeline (from orchestrator add_edge scans)
+    for e in pipeline_edges:
+        pair = (e["source"], e["target"])
+        if pair not in seen_pairs:
+            seen_pairs.add(pair)
+            edges.append(e)
+
+    # Default sequential pipeline if nothing detected
+    if len(edges) <= len(agent_folders) and not pipeline_edges and len(agent_folders) > 1:
+        for i in range(len(agent_folders) - 1):
+            pair = (agent_folders[i], agent_folders[i + 1])
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                edges.append({
+                    "source": agent_folders[i],
+                    "target": agent_folders[i + 1],
+                    "label": "output → input",
+                    "type": "pipeline",
+                })
+
+    return {
+        "team": {
+            "id": agent["_id"],
+            "name": agent["name"],
+            "status": agent.get("status", "idle"),
+            "run_count": agent.get("run_count", 0),
+            "agent_folders": agent_folders,
+            "detected_tools": agent.get("detected_tools", []),
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
 async def get_full_graph() -> dict[str, Any]:
     """Return all agents as nodes and all relationships as edges."""
     db = get_database()

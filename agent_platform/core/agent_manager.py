@@ -139,12 +139,27 @@ def _check_ref(
             refs.append(ref)
 
 
+_SKIP_DIRS = {".venv", "__pycache__", "logs", ".git", "node_modules", ".mypy_cache", ".ruff_cache"}
+_SKIP_FILES = {".DS_Store", ".gitkeep", ".gitignore", ".env"}
+_SKIP_SUFFIXES = {".pyc", ".pyo", ".pyd", ".zip"}
+
+
 def _build_source_structure(base: Path) -> dict[str, Any]:
-    """Build a nested dict representing the file tree for the UI file browser."""
+    """Build a nested dict representing the file tree for the UI file browser.
+
+    Excludes virtual environments, caches, compiled files, and other noise
+    so only meaningful source files are shown.
+    """
     structure: dict[str, Any] = {}
     for item in sorted(base.rglob("*")):
         rel = item.relative_to(base)
         parts = rel.parts
+        # Skip anything inside a noise directory
+        if any(p in _SKIP_DIRS for p in parts):
+            continue
+        # Skip noise files and compiled artifacts
+        if item.is_file() and (item.name in _SKIP_FILES or item.suffix in _SKIP_SUFFIXES):
+            continue
         node = structure
         for part in parts[:-1]:
             node = node.setdefault(part, {})
@@ -167,6 +182,18 @@ def _parse_agent_configs(base: Path, agent_folders: list[str]) -> dict[str, Any]
             except Exception:
                 configs[folder] = {}
     return configs
+
+
+def _read_readme(base: Path) -> str | None:
+    """Read a README.md file from the agent root if it exists."""
+    for name in ("README.md", "readme.md", "Readme.md"):
+        path = base / name
+        if path.exists():
+            try:
+                return path.read_text(encoding="utf-8")
+            except Exception:
+                logger.warning("Failed to read %s in %s", name, base)
+    return None
 
 
 def _parse_run_config(base: Path) -> dict[str, Any] | None:
@@ -244,6 +271,7 @@ async def register_agent(
     detected_nodes, detected_tools = _detect_nodes_and_tools(root_dir)
     agent_configs = _parse_agent_configs(root_dir, validation.agent_folders)
     run_config = _parse_run_config(root_dir)
+    readme_md = _read_readme(root_dir)
 
     agent_repo, *_ = _repos()
 
@@ -265,6 +293,8 @@ async def register_agent(
     }
     if run_config:
         agent_doc["run_config"] = run_config
+    if readme_md:
+        agent_doc["description"] = readme_md
     doc = await agent_repo.create(agent_doc)
 
     # Store agent configs as part of the document

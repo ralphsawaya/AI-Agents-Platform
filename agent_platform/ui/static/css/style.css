@@ -719,3 +719,589 @@ label {
 .text-dim { color: var(--text-dim); }
 .text-sm { font-size: 0.78rem; }
 .mono { font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace; }
+.mb-2 { margin-bottom: 2rem; }
+
+/* ── README / Markdown renderer ── */
+.readme-md {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem 2rem;
+    line-height: 1.7;
+    color: var(--text);
+}
+.readme-md h1, .readme-md h2, .readme-md h3, .readme-md h4 {
+    color: var(--text);
+    margin: 1.25rem 0 0.5rem;
+    font-weight: 600;
+}
+.readme-md h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border); padding-bottom: .5rem; }
+.readme-md h2 { font-size: 1.15rem; border-bottom: 1px solid var(--border); padding-bottom: .3rem; }
+.readme-md h3 { font-size: 1rem; }
+.readme-md p { margin: 0.6rem 0; }
+.readme-md ul, .readme-md ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+.readme-md li { margin: 0.25rem 0; }
+.readme-md code {
+    background: var(--surface-3);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+}
+.readme-md pre {
+    background: var(--surface-3);
+    border-radius: var(--radius);
+    padding: 1rem;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+}
+.readme-md pre code { background: none; padding: 0; }
+.readme-md blockquote {
+    border-left: 3px solid var(--primary);
+    margin: 0.75rem 0;
+    padding: 0.25rem 1rem;
+    color: var(--text-dim);
+}
+.readme-md strong { color: var(--text); font-weight: 600; }
+.readme-md a { color: var(--primary); text-decoration: none; }
+.readme-md a:hover { text-decoration: underline; }
+.readme-md hr { border: none; border-top: 1px solid var(--border); margin: 1.25rem 0; }
+
+/* ── Monitor table — fixed layout prevents column/row resize flicker ── */
+#monitor-table td,
+#monitor-table th {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Pill badges (Overview tab) ── */
+.pill-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+.pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.25rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    white-space: nowrap;
+    letter-spacing: 0.01em;
+}
+.pill-node {
+    background: rgba(99, 102, 241, 0.15);
+    color: #a5b4fc;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+.pill-tool {
+    background: rgba(16, 185, 129, 0.12);
+    color: #6ee7b7;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.pill-folder {
+    background: rgba(245, 158, 11, 0.12);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
+/* ── Collapsible sections (agent detail) ── */
+.collapsible-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    margin-bottom: 1.25rem;
+    overflow: hidden;
+}
+
+.collapsible-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1.1rem;
+    cursor: pointer;
+    background: var(--surface-2);
+    user-select: none;
+    transition: background var(--transition);
+}
+
+.collapsible-header:hover { background: var(--surface-3); }
+
+.collapsible-header h3 {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+}
+
+.collapsible-chevron {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    transition: transform 0.2s ease;
+    line-height: 1;
+}
+
+.collapsible-section.collapsed .collapsible-chevron {
+    transform: rotate(-90deg);
+}
+
+.collapsible-body {
+    padding: 1.25rem 1.25rem 1rem;
+    border-top: 1px solid var(--border);
+}
+
+.collapsible-section.collapsed .collapsible-body {
+    display: none;
+}
+
+/* ── Inline graph canvas (agent detail overview) ── */
+#detail-graph-wrap {
+    position: relative;
+    height: 400px;
+    background: var(--surface-2);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+#detail-cy {
+    width: 100%;
+    height: 100%;
+}
+
+#detail-cy-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: .75rem;
+    color: var(--text-dim);
+    font-size: 0.84rem;
+}
+
+.detail-graph-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+}
+
+/* ── Node detail panel (below graph canvas) ── */
+.detail-node-panel {
+    margin-top: 0.75rem;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1rem 1.1rem;
+    animation: slideIn 0.18s ease;
+}
+
+.detail-node-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.85rem;
+}
+
+.detail-node-panel-header strong {
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.detail-node-desc {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: 0.85rem;
+}
+
+.detail-node-section-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--text-dim);
+    margin-bottom: .4rem;
+    margin-top: .75rem;
+}
+
+.detail-node-list {
+    padding-left: 1.2rem;
+    margin: 0;
+}
+
+.detail-node-list li {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    padding: .2rem 0;
+    display: flex;
+    align-items: baseline;
+    gap: .5rem;
+}
+
+.detail-node-list li strong {
+    font-weight: 500;
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.78rem;
+}
+
+.detail-node-step {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-left: .3rem;
+}
+
+.detail-node-flow {
+    margin-top: .85rem;
+    padding-top: .75rem;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+}
+
+.detail-flow-row {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: .4rem;
+}
+
+.detail-flow-row strong { color: var(--text); }
+
+.detail-flow-icon {
+    font-size: 0.9rem;
+    color: var(--primary);
+    font-weight: 700;
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+/* ── Cytoscape HTML node label cards ── */
+.cy-card {
+    font-family: 'Inter', -apple-system, sans-serif;
+    pointer-events: none;
+    user-select: none;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.45), 0 1px 4px rgba(0,0,0,0.3);
+}
+
+/* Orchestrator card */
+.cy-card-orch {
+    background: linear-gradient(145deg, #5b57d4 0%, #3730a3 100%);
+    border: 2px solid rgba(129,140,248,0.5);
+    padding: 10px 12px;
+    min-width: 108px;
+    text-align: center;
+}
+
+.cy-card-orch .cy-card-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.02em;
+    margin-bottom: 6px;
+}
+
+.cy-card-orch .cy-card-sep {
+    height: 1px;
+    background: rgba(255,255,255,0.25);
+    margin-bottom: 6px;
+}
+
+.cy-card-orch .cy-item {
+    font-size: 10px;
+    color: rgba(255,255,255,0.82);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 3px;
+    justify-content: center;
+}
+
+/* Agent card */
+.cy-card-agent {
+    background: #1c1c24;
+    border: 1.5px solid rgba(255,255,255,0.12);
+    min-width: 148px;
+}
+
+.cy-card-header {
+    padding: 8px 12px 7px;
+    position: relative;
+}
+
+.cy-card-header::after {
+    content: '';
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 1px;
+    background: rgba(255,255,255,0.2);
+}
+
+.cy-card-agent .cy-card-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.01em;
+    text-align: center;
+}
+
+.cy-card-body {
+    padding: 8px 12px 9px;
+    background: rgba(0,0,0,0.22);
+}
+
+.cy-item {
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.78);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 0;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.cy-item-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.45);
+    flex-shrink: 0;
+}
+
+.cy-item-empty {
+    font-size: 10px;
+    color: rgba(255,255,255,0.4);
+    font-style: italic;
+    text-align: center;
+    padding: 2px 0;
+}
+
+.cy-item-more {
+    font-size: 9.5px;
+    color: rgba(255,255,255,0.4);
+    margin-top: 2px;
+    text-align: center;
+    font-style: italic;
+}
+
+/* ══════════════════════════════════════
+   PIPELINE GRAPH PAGE
+   ══════════════════════════════════════ */
+
+/* Two-panel layout */
+#graph-layout {
+    display: flex;
+    gap: 1rem;
+    height: calc(100vh - 130px);
+    min-height: 480px;
+}
+
+/* ── Canvas wrap ── */
+#cy-wrap {
+    flex: 1;
+    position: relative;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+#cy { width: 100%; height: 100%; }
+
+#cy-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: .75rem;
+}
+
+.cy-empty-icon {
+    font-size: 3.5rem;
+    opacity: 0.18;
+    line-height: 1;
+}
+
+/* Floating legend (bottom-left of canvas) */
+#graph-legend {
+    position: absolute;
+    bottom: 1rem;
+    left: 1rem;
+    background: rgba(9, 9, 11, 0.85);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: .6rem .85rem;
+    backdrop-filter: blur(6px);
+    z-index: 10;
+}
+
+.legend-row {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .72rem;
+    color: var(--text-dim);
+    margin-bottom: .25rem;
+}
+.legend-row:last-child { margin-bottom: 0; }
+
+.lnode {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex-shrink: 0;
+}
+.lnode-orch  { background: #6366f1; border-radius: 50%; }
+.lnode-agent { background: #3b82f6; border-radius: 3px; }
+
+.ledge { font-family: monospace; font-size: .8rem; }
+.ledge-invoke   { color: #818cf8; }
+.ledge-pipeline { color: #38bdf8; }
+
+/* ── Info panel ── */
+#info-panel {
+    width: 272px;
+    flex-shrink: 0;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.info-empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: .75rem;
+}
+
+.info-empty-icon {
+    font-size: 2.5rem;
+    opacity: 0.15;
+}
+
+.info-section { margin-bottom: 1.1rem; }
+
+.info-section-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .09em;
+    color: var(--text-dim);
+    margin-bottom: .35rem;
+}
+
+.info-team-name {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.info-stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .6rem;
+    margin-bottom: 1.1rem;
+}
+
+.info-stat {
+    background: var(--surface-3);
+    border-radius: var(--radius);
+    padding: .6rem .75rem;
+}
+
+.info-stat-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1;
+}
+
+.info-stat-label {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    margin-top: .2rem;
+}
+
+.info-divider {
+    border-top: 1px solid var(--border);
+    margin: 1rem 0;
+}
+
+/* Selected node info */
+.info-node-name {
+    font-size: .95rem;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: .3rem;
+}
+
+.info-type-badge {
+    display: inline-block;
+    font-size: .68rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    padding: .18rem .55rem;
+    border-radius: 999px;
+}
+.info-type-orchestrator { background: rgba(99,102,241,.2); color: #a5b4fc; }
+.info-type-agent        { background: rgba(59,130,246,.2);  color: #93c5fd; }
+
+/* Subnode list */
+.subnode-row {
+    display: flex;
+    align-items: center;
+    gap: .55rem;
+    padding: .35rem 0;
+    border-bottom: 1px solid var(--border);
+}
+.subnode-row:last-child { border-bottom: none; }
+
+.subnode-index {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--surface-3);
+    color: var(--text-dim);
+    font-size: .65rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.subnode-name {
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: .78rem;
+    color: var(--text);
+}
+
+/* Legend inside panel */
+.legend-panel-row {
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+    font-size: .75rem;
+    color: var(--text-dim);
+    margin-bottom: .45rem;
+    line-height: 1.4;
+}
+.legend-panel-row:last-child { margin-bottom: 0; }

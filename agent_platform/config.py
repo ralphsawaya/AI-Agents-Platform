@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     LOG_RETENTION_DAYS: int = 30
     PORT: int = 8000
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    groq_api_key: str = ""
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

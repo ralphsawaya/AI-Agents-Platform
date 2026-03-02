@@ -61,6 +61,7 @@ class MonitorService:
         for run_id, info in list(active.items()):
             pid = info["pid"]
             agent_id = info["agent_id"]
+            agent_name = info.get("agent_name", "unknown")
             start = info["start"]
             elapsed = time.time() - start
 
@@ -99,6 +100,7 @@ class MonitorService:
             snapshot.append({
                 "run_id": run_id,
                 "agent_id": agent_id,
+                "agent_name": agent_name,
                 "pid": pid,
                 "cpu_percent": cpu,
                 "memory_mb": round(mem, 1),

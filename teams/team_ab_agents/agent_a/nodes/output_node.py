@@ -1,5 +1,7 @@
 """Output node — stores the summary in MongoDB and finalises."""
 
+import time
+
 from shared.logger import get_logger
 from shared.mongo import get_collection, get_next_text_id
 
@@ -20,6 +22,6 @@ def output_node(state: dict) -> dict:
 
     col = get_collection()
     col.insert_one(doc)
-    logger.info("Stored summary in MongoDB with text_id=%d", text_id)
-
+    logger.info("Stored summary in MongoDB with text_id=%d — finalising AgentA (5s)…", text_id)
+    time.sleep(5)
     return {"text_id": text_id, "status": "complete"}
