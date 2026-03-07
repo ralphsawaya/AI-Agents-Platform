@@ -33,7 +33,7 @@ Analyst --> Strategist --> END
 
 ### Pipeline 2 — Execution Flow (Event-Driven)
 
-Triggered automatically by a TradingView webhook — **not meant to be run manually**.
+Triggered automatically by a TradingView webhook — **not meant to be run manually or scheduled**.
 
 ```
 Risk Manager --> Executor --> END
