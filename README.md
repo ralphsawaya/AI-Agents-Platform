@@ -190,6 +190,21 @@ python3 build_zip.py
 # → creates team_ab.zip ready for upload
 ```
 
+## Development Workflow
+
+The project has two copies of each agent team's code:
+
+| Location | Purpose |
+|----------|---------|
+| `teams/<team_name>/` | Development source — edit code here |
+| `agent_platform/agents_store/<agent_id>/<team_name>/` | Runtime copy — the platform runs agents from here |
+
+When you upload a `.zip`, the platform extracts it into `agents_store/` under a unique agent ID and builds a dedicated venv there. The platform always executes code from `agents_store/`, never from `teams/`.
+
+**During development with Cursor**, a project rule (`.cursor/rules/sync-team-to-agents-store.mdc`) ensures that every edit made to a file under `teams/` is automatically applied to the corresponding file in `agents_store/`. This includes `.env` files, source code, config files, and templates — so changes take effect immediately without re-uploading a zip.
+
+If you're not using Cursor, you'll need to either re-zip and re-upload, or manually copy changed files into the `agents_store/` directory.
+
 ## Architecture Overview
 
 ```

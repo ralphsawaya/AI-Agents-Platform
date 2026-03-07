@@ -9,7 +9,7 @@ from agent_analyst.prompts.prompt_templates import REGIME_CLASSIFICATION_PROMPT
 
 logger = get_logger("analyst.classify_regime")
 
-VALID_REGIMES = {"trending_up", "trending_down", "ranging", "high_volatility"}
+VALID_REGIMES = {"trending_up", "trending_down", "ranging", "high_volatility", "breakout", "accumulation"}
 
 
 def classify_regime(state: dict) -> dict:

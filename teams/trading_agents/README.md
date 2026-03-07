@@ -23,11 +23,15 @@ Analyst --> Strategist --> END
    - `trending_down` — strong downtrend, ADX > 25, EMA alignment bearish
    - `ranging` — low ADX, narrow Bollinger Bands, sideways price action
    - `high_volatility` — ATR spike, wide Bollinger Bands, unstable direction
+   - `breakout` — price breaking out of consolidation with rising ADX and volume surge
+   - `accumulation` — tight consolidation with very narrow Bollinger Bands and building volume, pre-breakout phase
 
 2. **The Strategist** maps the regime to the best-fit Pine Script strategy:
    - Trending regimes --> `trend_following`
    - Ranging --> `mean_reversion`
    - High volatility --> `scalping`
+   - Breakout --> `trend_following` (ride the momentum after the break)
+   - Accumulation --> `mean_reversion` (profit from the tight range while awaiting breakout)
 
    For edge cases (low confidence, regime transitions), Gemini provides a second opinion before committing. The active strategy is stored in MongoDB.
 
@@ -107,7 +111,7 @@ The `compute_indicators` node runs the 4H candles through the Python `ta` librar
 ### Stage 3 — Gemini classifies the regime
 
 All 19 indicators are formatted into a structured prompt and sent to Gemini. Gemini reads the numbers and returns:
-- **Regime** — one of `trending_up`, `trending_down`, `ranging`, `high_volatility`
+- **Regime** — one of `trending_up`, `trending_down`, `ranging`, `high_volatility`, `breakout`, `accumulation`
 - **Confidence** — 0–100%
 - **Reasoning** — a natural-language explanation of the classification
 

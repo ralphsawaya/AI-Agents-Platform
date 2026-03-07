@@ -9,6 +9,8 @@ REGIME_STRATEGY_MAP = {
     "trending_down": ["trend_following"],
     "ranging": ["mean_reversion"],
     "high_volatility": ["scalping"],
+    "breakout": ["trend_following"],
+    "accumulation": ["mean_reversion"],
 }
 
 ALL_STRATEGIES = ["trend_following", "mean_reversion", "scalping"]

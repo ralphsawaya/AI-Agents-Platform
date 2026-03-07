@@ -18,11 +18,16 @@ STRATEGY DESCRIPTIONS:
 2. mean_reversion: Bollinger Band bounce with RSI confirmation. Best when ADX < 20, price near BB extremes, RSI at oversold/overbought.
 3. scalping: VWAP + volume spike entries. Best during high volatility with strong volume, quick in-and-out trades.
 
+REGIME NOTES:
+- breakout: A fresh directional move is starting. trend_following captures the momentum after the break.
+- accumulation: Price is consolidating before a move. mean_reversion profits from the tight range while waiting for the breakout.
+
 SELECTION CRITERIA:
 - Match strategy to regime strength and clarity
 - Consider regime transition risk (if confidence is borderline)
 - Prefer mean_reversion as the safe default when signals are mixed
 - Consider volume conditions (low volume favors mean_reversion)
+- During accumulation, mean_reversion benefits from the tight range but position sizing should be conservative
 
 Respond in EXACTLY this format (2 lines):
 STRATEGY: <one of: trend_following, mean_reversion, scalping>
