@@ -182,7 +182,7 @@ trading_agents/
 
 ## Configuration
 
-All configuration is injected via environment variables by the platform:
+All configuration is injected via environment variables by the platform (AI-Agents-Platform/teams/trading_agents/shared/config.py):
 
 | Variable | Description | Default |
 |----------|-------------|---------|
