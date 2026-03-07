@@ -25,8 +25,9 @@ AI-Agents-Platform/
 │   ├── ui/                  # Jinja2 templates, CSS, JS
 │   └── agents_store/        # Extracted agent packages (auto-managed)
 └── teams/                   # Your agent team workspaces
-    ├── sample_agents/        # Example team (my_first_agents)
-    └── team_ab_agents/       # Example two-agent pipeline (Agent A + Agent B)
+    ├── sample_agents/       # Example team (my_first_agents)
+    ├── team_ab_agents/      # Two-agent pipeline (Summarise + Title)
+    └── trading_agents/      # Autonomous BTC/USDT trading system (4 agents)
 ```
 
 Each folder inside `teams/` is a **team workspace** — a place to develop and package an agent team. When ready, run `build_zip.py` inside the workspace to produce a `.zip` ready for upload.
@@ -72,6 +73,10 @@ my_team/
 ├── README.md                   # Optional — shown in the Overview tab
 ├── run_config.json             # Optional — defines a custom Run input form
 ├── requirements.txt            # Top-level dependencies
+├── ui/                         # Optional — custom UI tabs (plugin system)
+│   ├── tabs.json               # Tab definitions (id + label)
+│   └── tabs/                   # One HTML fragment per tab
+│       └── my_tab.html         # Self-contained HTML + <style> + <script>
 ├── shared/                     # Shared utilities across all agents
 │   ├── __init__.py
 │   ├── config.py
@@ -123,6 +128,45 @@ Define a custom input form for the **Run** modal instead of the default raw-JSON
 
 Supported field types: `textarea`, `text`, `number`, `select`.
 
+### Optional: `ui/tabs.json` (Custom Tabs Plugin)
+
+Agent teams can ship custom UI tabs that appear on the agent detail page alongside the standard tabs (Overview, Files, Runs, Schedules, Danger Zone). Define a `ui/tabs.json` file in the zip root:
+
+```json
+{
+  "tabs": [
+    { "id": "trading",  "label": "Trading" },
+    { "id": "trades",   "label": "Trades" }
+  ]
+}
+```
+
+For each tab, create a matching HTML fragment at `ui/tabs/<id>.html`. Each fragment is self-contained and can include its own `<style>` and `<script>` blocks:
+
+```html
+<style>
+.my-card { padding: 16px; background: var(--surface); border-radius: 8px; }
+</style>
+
+<h3>My Custom Tab</h3>
+<div class="my-card" id="my-data">Loading…</div>
+
+<script>
+(function() {
+    async function loadData() {
+        const res = await API.get('/api/my-endpoint');
+        if (res.success) {
+            document.getElementById('my-data').innerHTML = res.data;
+        }
+    }
+    loadData();
+    setInterval(loadData, 15000);
+})();
+</script>
+```
+
+Scripts are executed automatically after injection. Use IIFEs to avoid polluting the global scope. The platform's `API` helper and `toast()` function are available globally.
+
 ### Optional: `README.md`
 
 Any `README.md` in the zip root is automatically read and rendered as the **Description** in the Overview tab, using full Markdown formatting.
@@ -149,21 +193,22 @@ python3 build_zip.py
 ## Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Browser UI                           │
-│  Dashboard │ Agent Detail │ Monitor │ Scheduler │ Graph │
-└─────────────────────┬───────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                     Browser UI                       │
+│  Dashboard │ Agent Detail (+Custom Tabs) │ Monitor   │
+│  Scheduler │ Graph                                   │
+└─────────────────────┬────────────────────────────────┘
                       │ HTTP / WebSocket
-┌─────────────────────▼───────────────────────────────────┐
-│                  FastAPI Application                    │
-│  REST Routes │ WebSocket Endpoints │ Jinja2 Renderer    │
-└──────┬──────────────┬───────────────────────────────────┘
+┌─────────────────────▼────────────────────────────────┐
+│                  FastAPI Application                 │
+│  REST Routes │ Webhook API │ Trading API │ WS │ SSR  │
+└──────┬──────────────┬────────────────────────────────┘
        │              │
-┌──────▼──────┐ ┌─────▼──────────────────────────────────┐
-│  Core Logic │ │           Data Layer (Motor)            │
-│  validator  │ │  agent_repo │ run_repo │ schedule_repo  │
-│  executor   │ │  relationship_repo │ indexes            │
-│  scheduler  │ └─────────────────────┬──────────────────┘
+┌──────▼──────┐ ┌─────▼────────────────────────────────┐
+│  Core Logic │ │           Data Layer (Motor)          │
+│  validator  │ │  agent_repo │ run_repo │ sched_repo   │
+│  executor   │ │  relationship_repo │ indexes          │
+│  scheduler  │ └─────────────────────┬────────────────┘
 │  monitor    │                       │
 │  graph_bld  │               ┌───────▼───────┐
 │  venv_mgr   │               │   MongoDB 8.0 │
@@ -173,6 +218,7 @@ python3 build_zip.py
 │  agents_store/ (on disk)  │
 │  <uuid>/ per agent team   │
 │    ├── extracted files    │
+│    ├── ui/tabs/ (plugins) │
 │    ├── .venv/             │
 │    └── logs/<run_id>.log  │
 └───────────────────────────┘
@@ -184,11 +230,12 @@ python3 build_zip.py
 Summary cards (total teams, running, scheduled, errored), card/table toggle, search and filter by status/tags/name, upload modal with drag-and-drop.
 
 ### Agent Detail
-Tabbed interface:
-- **Overview** — stat cards, detected LangGraph nodes (indigo pills), tools (green pills), agent folders (amber pills), and a rendered Markdown description
+Tabbed interface with standard tabs for all teams, plus optional custom tabs per team:
+- **Overview** — stat cards, detected LangGraph nodes (indigo pills), tools (green pills), agent folders (amber pills), rendered Markdown description, and interactive pipeline graph
 - **Files** — read-only source file browser with syntax highlighting (excludes `.venv`, caches, and build artifacts)
 - **Runs** — paginated run history with log viewer and live WebSocket tail
 - **Schedules** — create/edit/delete cron, interval, or one-time schedules
+- **Custom Tabs** — team-specific tabs loaded as plugins from `ui/tabs/` in the team package (e.g. the trading team ships Trading, Trades, Signals, and Strategy tabs)
 - **Danger Zone** — permanent deletion with confirmation
 
 ### Monitor
@@ -214,6 +261,13 @@ All settings are in `agent_platform/config.py` and overridable via `.env`:
 | `LOG_RETENTION_DAYS` | `30` | TTL for run log documents |
 | `PORT` | `8000` | Server port |
 | `GROQ_API_KEY` | *(empty)* | Forwarded to all agent subprocesses |
+| `ANTHROPIC_API_KEY` | *(empty)* | For agent teams using Claude |
+| `BINANCE_API_KEY` | *(empty)* | For the trading agents team |
+| `BINANCE_API_SECRET` | *(empty)* | For the trading agents team |
+| `TRADINGVIEW_WEBHOOK_SECRET` | *(empty)* | Webhook authentication secret |
+| `TRADING_ENABLED` | `true` | Global trading kill switch |
+| `TRADING_DRY_RUN` | `true` | Simulate trades without real orders |
+| `TRADING_MAX_DAILY_TRADES` | `50` | Daily trade limit |
 
 ## Technical Stack
 

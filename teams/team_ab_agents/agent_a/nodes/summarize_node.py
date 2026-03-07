@@ -1,4 +1,4 @@
-"""Summarize node — uses Gemini LLM to create a concise summary."""
+"""Summarize node — uses Groq LLM to create a concise summary."""
 
 import time
 
@@ -18,7 +18,7 @@ def summarize_node(state: dict) -> dict:
     text = state["input_text"]
     prompt = SUMMARIZE_TEMPLATE.format(text=text)
 
-    logger.info("Calling Gemini LLM for summarization…")
+    logger.info("Calling Groq LLM for summarization…")
     summary = llm.invoke(prompt)
 
     logger.info("Summary generated: %d words — post-processing (15s)…", word_count(summary))

@@ -15,11 +15,12 @@
 
 <div id="agent-status-bar" class="mb-1"></div>
 
-<div class="tabs">
+<div class="tabs" id="detail-tabs">
     <div class="tab active" data-tab="overview">Overview</div>
     <div class="tab" data-tab="files">Files</div>
     <div class="tab" data-tab="runs">Runs</div>
     <div class="tab" data-tab="schedules">Schedules</div>
+    <!-- custom tabs injected here by JS -->
     <div class="tab" data-tab="danger">Danger Zone</div>
 </div>
 
@@ -115,6 +116,8 @@
     <div id="schedules-table">Loading…</div>
 </div>
 
+<!-- Custom tab content panels are injected here dynamically by JS -->
+
 <!-- Danger Zone -->
 <div class="tab-content" id="tab-danger">
     <div class="danger-zone">
@@ -178,6 +181,10 @@
 {% endblock %}
 
 {% block scripts %}
+<style>
+.tab.tab-custom { color:var(--info); }
+.tab.tab-custom.active { color:var(--info);border-bottom-color:var(--info); }
+</style>
 <script>
 const AGENT_ID = '{{ agent_id }}';
 let currentRunsPage = 1;
@@ -245,6 +252,7 @@ async function loadAgent() {
     if (!res.success) { toast(res.error, 'error'); return; }
     const a = res.data;
     document.getElementById('agent-name').textContent = a.name;
+
     buildRunForm(a.run_config || null);
 
     const isBuilding = !a.venv_ready && a.status !== 'error';
@@ -278,6 +286,8 @@ async function loadAgent() {
     } else {
         readmeSection.style.display = 'none';
     }
+
+    injectCustomTabs(a);
 
     const needsPoll = isBuilding || a.status === 'running';
     if (needsPoll && !_buildPollInterval) {
@@ -851,14 +861,93 @@ function detailGraphStyle() {
     ];
 }
 
+/* ═══════════════════════════════════════════════
+   Custom tabs — plugin system (loaded from team files)
+   ═══════════════════════════════════════════════ */
+let _customTabsInjected = false;
+
+async function injectCustomTabs(agent) {
+    if (_customTabsInjected) return;
+    _customTabsInjected = true;
+
+    const rootFolder = agent.root_folder || agent.name;
+    let tabs = agent.custom_tabs;
+
+    if (!tabs || !tabs.length) {
+        const tabsCfgPath = `${rootFolder}/ui/tabs.json`;
+        const res = await API.get(`/api/agents/${AGENT_ID}/files/${tabsCfgPath}`);
+        if (res.success && res.data && res.data.content) {
+            try {
+                const cfg = JSON.parse(res.data.content);
+                tabs = cfg.tabs || [];
+            } catch { tabs = []; }
+        }
+    }
+
+    if (!tabs || !tabs.length) return;
+
+    const tabBar = document.getElementById('detail-tabs');
+    const dangerTab = tabBar.querySelector('[data-tab="danger"]');
+    const container = tabBar.parentElement;
+    const dangerContent = document.getElementById('tab-danger');
+
+    tabs.forEach(t => {
+        const tabEl = document.createElement('div');
+        tabEl.className = 'tab tab-custom';
+        tabEl.dataset.tab = `custom-${t.id}`;
+        tabEl.textContent = t.label;
+        tabBar.insertBefore(tabEl, dangerTab);
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'tab-content';
+        contentEl.id = `tab-custom-${t.id}`;
+        contentEl.innerHTML = '<p class="text-dim">Loading…</p>';
+        container.insertBefore(contentEl, dangerContent);
+
+        tabEl.addEventListener('click', () => {
+            tabBar.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+            tabEl.classList.add('active');
+            container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            contentEl.classList.add('active');
+        });
+
+        _loadTabFragment(agent, rootFolder, t.id, contentEl);
+    });
+}
+
+async function _loadTabFragment(agent, rootFolder, tabId, contentEl) {
+    const filePath = `${rootFolder}/ui/tabs/${tabId}.html`;
+    const res = await API.get(`/api/agents/${AGENT_ID}/files/${filePath}`);
+    if (!res.success) {
+        contentEl.innerHTML = `<p class="text-dim">Tab content not found.</p>`;
+        return;
+    }
+
+    const html = res.data.content;
+    contentEl.innerHTML = html;
+
+    _activateScripts(contentEl);
+}
+
+function _activateScripts(container) {
+    const scripts = container.querySelectorAll('script');
+    scripts.forEach(oldScript => {
+        const newScript = document.createElement('script');
+        if (oldScript.src) {
+            newScript.src = oldScript.src;
+        } else {
+            newScript.textContent = oldScript.textContent;
+        }
+        oldScript.parentNode.replaceChild(newScript, oldScript);
+    });
+}
+
 loadAgent();
 loadFileTree();
 loadRuns(1);
 loadSchedules();
 loadDetailGraph();
 
-// General refresh: poll agent + runs every 5s to catch status transitions
-// (run completing, build finishing, scheduled runs starting, etc.)
 setInterval(() => {
     if (!_buildPollInterval) {
         loadAgent();

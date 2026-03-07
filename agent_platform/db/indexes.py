@@ -58,3 +58,43 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
             unique=True,
         ),
     ])
+
+    # --- Trading collections ---
+
+    market_regimes = db["market_regimes"]
+    await _safe_create_indexes(market_regimes, [
+        IndexModel([("timestamp", DESCENDING)]),
+        IndexModel(
+            [("created_at", ASCENDING)],
+            expireAfterSeconds=30 * 86400,
+        ),
+    ])
+
+    strategy_selections = db["strategy_selections"]
+    await _safe_create_indexes(strategy_selections, [
+        IndexModel([("timestamp", DESCENDING)]),
+        IndexModel([("active_strategy", ASCENDING)]),
+    ])
+
+    trade_signals = db["trade_signals"]
+    await _safe_create_indexes(trade_signals, [
+        IndexModel([("timestamp", DESCENDING)]),
+        IndexModel([("strategy_name", ASCENDING)]),
+        IndexModel([("matched", ASCENDING)]),
+        IndexModel(
+            [("created_at", ASCENDING)],
+            expireAfterSeconds=90 * 86400,
+        ),
+    ])
+
+    trades = db["trades"]
+    await _safe_create_indexes(trades, [
+        IndexModel([("timestamp", DESCENDING)]),
+        IndexModel([("status", ASCENDING)]),
+        IndexModel([("side", ASCENDING)]),
+    ])
+
+    risk_state = db["risk_state"]
+    await _safe_create_indexes(risk_state, [
+        IndexModel([("updated_at", DESCENDING)]),
+    ])

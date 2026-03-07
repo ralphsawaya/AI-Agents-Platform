@@ -1,0 +1,6 @@
+name: agent_executor
+role: trade_executor
+description: Validates signals, places orders on Binance Spot, confirms fills, and sets stop-loss orders
+model: gemini-2.5-flash
+temperature: 0.0
+max_tokens: 1024

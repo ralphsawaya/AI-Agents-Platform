@@ -1,0 +1,6 @@
+name: agent_analyst
+role: market_analyst
+description: Monitors BTC/USDT market data, computes technical indicators, and classifies the current market regime using Gemini
+model: gemini-2.5-flash
+temperature: 0.2
+max_tokens: 2048

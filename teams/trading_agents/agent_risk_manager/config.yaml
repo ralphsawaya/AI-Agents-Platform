@@ -1,0 +1,6 @@
+name: agent_risk_manager
+role: risk_manager
+description: Dynamically sizes positions, sets stop-loss levels, and enforces risk limits before trade execution
+model: gemini-2.5-flash
+temperature: 0.1
+max_tokens: 1024

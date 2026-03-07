@@ -94,9 +94,18 @@ async def execute_agent(
     env["AGENT_RUN_ID"] = run_id
     env["AGENT_ARGS"] = json.dumps(args or {})
 
-    # Forward API keys from platform settings into the agent subprocess environment
-    if settings.groq_api_key:
-        env["GROQ_API_KEY"] = settings.groq_api_key
+    # Load the team's own .env file if it exists in the agent root directory
+    team_env_path = root_dir / ".env"
+    if team_env_path.exists():
+        logger.info("Loading team .env from %s", team_env_path)
+        for line in team_env_path.read_text().splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                key, _, value = stripped.partition("=")
+                key = key.strip()
+                value = value.strip()
+                if key and value and value != "PLATFORM_MANAGED":
+                    env[key] = value
 
     timeout = agent.get("timeout_seconds", settings.DEFAULT_TIMEOUT_SECONDS)
 

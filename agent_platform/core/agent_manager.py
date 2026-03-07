@@ -215,20 +215,45 @@ def _parse_run_config(base: Path) -> dict[str, Any] | None:
         return None
 
 
+def _parse_custom_tabs(base: Path) -> list[dict[str, str]] | None:
+    """Read ui/tabs.json from the agent root if it exists.
+
+    This allows each agent team to ship custom UI tabs that the platform
+    loads as plugin fragments on the agent detail page.  Each tab references
+    an HTML file under ui/tabs/<id>.html.
+    """
+    import json
+
+    cfg_path = base / "ui" / "tabs.json"
+    if not cfg_path.exists():
+        return None
+    try:
+        with open(cfg_path, "r") as f:
+            data = json.load(f)
+        tabs = data.get("tabs", [])
+        if not tabs:
+            return None
+        valid = []
+        for t in tabs:
+            tab_id = t.get("id")
+            label = t.get("label")
+            if not tab_id or not label:
+                continue
+            html_path = base / "ui" / "tabs" / f"{tab_id}.html"
+            if html_path.exists():
+                valid.append({"id": tab_id, "label": label})
+            else:
+                logger.warning("Custom tab '%s' declared but %s not found", tab_id, html_path)
+        return valid if valid else None
+    except Exception:
+        logger.warning("Failed to parse ui/tabs.json in %s", base)
+        return None
+
+
 def _strip_env_secrets(env_path: Path) -> None:
-    """Remove actual secret values from an uploaded .env file, keeping keys."""
-    if not env_path.exists():
-        return
-    lines = env_path.read_text().splitlines()
-    cleaned: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#") and "=" in stripped:
-            key = stripped.split("=", 1)[0]
-            cleaned.append(f"{key}=PLATFORM_MANAGED")
-        else:
-            cleaned.append(line)
-    env_path.write_text("\n".join(cleaned) + "\n")
+    """Preserved for backward compatibility — team .env files are now kept
+    intact so each agent team can manage its own credentials."""
+    return
 
 
 # ── Public API ──
@@ -271,6 +296,7 @@ async def register_agent(
     detected_nodes, detected_tools = _detect_nodes_and_tools(root_dir)
     agent_configs = _parse_agent_configs(root_dir, validation.agent_folders)
     run_config = _parse_run_config(root_dir)
+    custom_tabs = _parse_custom_tabs(root_dir)
     readme_md = _read_readme(root_dir)
 
     agent_repo, *_ = _repos()
@@ -293,6 +319,8 @@ async def register_agent(
     }
     if run_config:
         agent_doc["run_config"] = run_config
+    if custom_tabs:
+        agent_doc["custom_tabs"] = custom_tabs
     if readme_md:
         agent_doc["description"] = readme_md
     doc = await agent_repo.create(agent_doc)
@@ -319,7 +347,14 @@ async def register_agent(
 
 async def get_agent(agent_id: str) -> dict[str, Any] | None:
     agent_repo = AgentRepository(get_database())
-    return await agent_repo.get_by_id(agent_id)
+    agent = await agent_repo.get_by_id(agent_id)
+    if agent and "run_config" not in agent:
+        root_dir = Path(agent.get("upload_path", "")) / agent.get("root_folder", "")
+        run_config = _parse_run_config(root_dir)
+        if run_config:
+            agent["run_config"] = run_config
+            await agent_repo.update(agent_id, {"run_config": run_config})
+    return agent
 
 
 async def list_agents(

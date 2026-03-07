@@ -1,0 +1,18 @@
+{
+    "fields": [
+        {
+            "name": "mode",
+            "label": "Pipeline Mode",
+            "type": "select",
+            "options": ["analysis", "execution"],
+            "required": true
+        },
+        {
+            "name": "dry_run",
+            "label": "Dry Run (no real trades)",
+            "type": "select",
+            "options": ["true", "false"],
+            "required": false
+        }
+    ]
+}

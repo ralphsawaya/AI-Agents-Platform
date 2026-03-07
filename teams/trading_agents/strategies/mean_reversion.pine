@@ -1,0 +1,70 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © AI-Agents-Platform — Mean Reversion Strategy
+// Designed for BTC/USDT on 4H timeframe
+// Webhook-enabled for automated trading via TradingView alerts
+
+//@version=6
+strategy("Mean Reversion [AI-Agents]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.1)
+
+// ── Inputs ──────────────────────────────────────────────────────────
+bbLen        = input.int(20,    "Bollinger Band Length", minval=5)
+bbStd        = input.float(2.0, "Bollinger Band Std Dev", minval=0.5, step=0.5)
+rsiLen       = input.int(14,    "RSI Length",            minval=2)
+rsiOversold  = input.float(30.0, "RSI Oversold Level",  minval=10.0, step=5.0)
+rsiOverbought = input.float(70.0, "RSI Overbought Level", minval=50.0, step=5.0)
+volMultiple  = input.float(1.5,  "Volume Confirmation Multiple", minval=1.0, step=0.1)
+atrLen       = input.int(14,    "ATR Length",            minval=1)
+atrSlMult    = input.float(1.5, "ATR Stop Loss Multiple", minval=0.5, step=0.5)
+webhookSecret = input.string("", "Webhook Secret", tooltip="Shared secret for webhook authentication")
+
+// ── Calculations ────────────────────────────────────────────────────
+[bbMiddle, bbUpper, bbLower] = ta.bb(close, bbLen, bbStd)
+rsi    = ta.rsi(close, rsiLen)
+atr    = ta.atr(atrLen)
+volMA  = ta.sma(volume, 20)
+
+// Volume confirmation
+highVolume = volume > volMA * volMultiple
+
+// ── Conditions ──────────────────────────────────────────────────────
+// Buy: price touches/crosses below lower BB + RSI oversold + volume confirmation
+buyCondition = close <= bbLower and rsi < rsiOversold and highVolume
+
+// Sell: price touches/crosses above upper BB + RSI overbought
+sellCondition = close >= bbUpper and rsi > rsiOverbought
+
+// Take profit at mean (middle BB)
+tpAtMean = strategy.position_size > 0 and close >= bbMiddle
+
+// Stop loss
+var float stopLossLevel = na
+if strategy.position_size > 0 and strategy.position_size[1] <= 0
+    stopLossLevel := strategy.position_avg_price - atr * atrSlMult
+else if strategy.position_size <= 0
+    stopLossLevel := na
+
+stopHit = strategy.position_size > 0 and not na(stopLossLevel) and close < stopLossLevel
+
+// ── Strategy Execution ──────────────────────────────────────────────
+if buyCondition and strategy.position_size <= 0
+    strategy.entry("MR Long", strategy.long, alert_message='{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"buy","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+
+if sellCondition and strategy.position_size > 0
+    strategy.close("MR Long", comment="Overbought Exit", alert_message='{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"sell","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+
+if tpAtMean
+    strategy.close("MR Long", comment="Mean TP", alert_message='{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"sell","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+
+if stopHit
+    strategy.close("MR Long", comment="Stop Loss", alert_message='{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"sell","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+
+// ── Plots ───────────────────────────────────────────────────────────
+plot(bbUpper,  "BB Upper",  color=color.red,    linewidth=1)
+plot(bbMiddle, "BB Middle", color=color.gray,   linewidth=1)
+plot(bbLower,  "BB Lower",  color=color.green,  linewidth=1)
+fill(plot(bbUpper), plot(bbLower), color=color.new(color.blue, 95), title="BB Fill")
+
+plot(strategy.position_size > 0 ? stopLossLevel : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=1)
+
+bgcolor(buyCondition  ? color.new(color.green, 90) : na, title="Buy Signal")
+bgcolor(sellCondition ? color.new(color.red, 90)   : na, title="Sell Signal")

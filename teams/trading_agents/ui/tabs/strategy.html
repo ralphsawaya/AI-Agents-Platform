@@ -1,0 +1,47 @@
+<style>
+.regime-badge { display:inline-block;padding:4px 12px;border-radius:12px;font-size:0.8rem;font-weight:600; }
+.regime-trending_up { background:#1a3a2a;color:#4ade80; }
+.regime-trending_down { background:#3a1a1a;color:#f87171; }
+.regime-ranging { background:#1a2a3a;color:#60a5fa; }
+.regime-high_volatility { background:#3a2a1a;color:#fbbf24; }
+</style>
+
+<h3 class="mb-1">Strategy Selection History</h3>
+<div id="tab-strategy-table">
+    <p class="text-dim">No strategy history.</p>
+</div>
+
+<script>
+(function() {
+    function fmtStrategy(s) {
+        if (!s) return '—';
+        return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+    function fmtTime(t) {
+        if (!t) return '—';
+        return new Date(t).toLocaleString();
+    }
+
+    async function loadStrategyHistory() {
+        const res = await API.get('/api/trading/strategy-history?limit=15');
+        if (!res.success || !res.data.length) return;
+        let html = `<table>
+            <thead><tr><th>Time</th><th>Strategy</th><th>Regime</th><th>Confidence</th><th>Reasoning</th></tr></thead>
+            <tbody>`;
+        for (const s of res.data) {
+            html += `<tr>
+                <td class="text-dim">${fmtTime(s.timestamp)}</td>
+                <td><strong>${fmtStrategy(s.active_strategy)}</strong></td>
+                <td><span class="regime-badge regime-${s.regime}">${s.regime}</span></td>
+                <td>${((s.confidence || 0) * 100).toFixed(0)}%</td>
+                <td class="text-dim" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">${s.reasoning || '—'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        document.getElementById('tab-strategy-table').innerHTML = html;
+    }
+
+    loadStrategyHistory();
+    window._ct_strategyInterval = setInterval(loadStrategyHistory, 15000);
+})();
+</script>

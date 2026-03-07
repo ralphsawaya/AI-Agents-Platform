@@ -18,6 +18,7 @@ class AgentRepository:
             "tags": data.get("tags", []),
             "status": "idle",
             "entry_point": data.get("entry_point", "orchestrator/main.py"),
+            "root_folder": data.get("root_folder", ""),
             "agent_folders": data.get("agent_folders", []),
             "has_orchestrator": data.get("has_orchestrator", True),
             "upload_path": data.get("upload_path", ""),
@@ -32,6 +33,10 @@ class AgentRepository:
             "created_at": now,
             "updated_at": now,
         }
+        if data.get("run_config"):
+            doc["run_config"] = data["run_config"]
+        if data.get("custom_tabs"):
+            doc["custom_tabs"] = data["custom_tabs"]
         await self._col.insert_one(doc)
         return doc
 

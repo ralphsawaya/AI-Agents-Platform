@@ -1,0 +1,45 @@
+<style>
+.matched-true { color:#4ade80; }
+.matched-false { color:#6b7280; }
+</style>
+
+<h3 class="mb-1">Recent Signals</h3>
+<div id="tab-signals-table">
+    <p class="text-dim">No signals received yet.</p>
+</div>
+
+<script>
+(function() {
+    function fmtStrategy(s) {
+        if (!s) return '—';
+        return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+    function fmtTime(t) {
+        if (!t) return '—';
+        return new Date(t).toLocaleString();
+    }
+
+    async function loadSignals() {
+        const res = await API.get('/api/trading/signals?limit=30');
+        if (!res.success || !res.data.length) return;
+        let html = `<table>
+            <thead><tr><th>Time</th><th>Strategy</th><th>Action</th><th>Price</th><th>Matched</th><th>Active Strategy</th></tr></thead>
+            <tbody>`;
+        for (const s of res.data) {
+            html += `<tr>
+                <td class="text-dim">${fmtTime(s.timestamp)}</td>
+                <td>${fmtStrategy(s.strategy_name)}</td>
+                <td><strong>${s.action}</strong></td>
+                <td>$${s.price.toFixed(2)}</td>
+                <td class="matched-${s.matched}">${s.matched ? 'YES' : 'NO'}</td>
+                <td class="text-dim">${fmtStrategy(s.active_strategy)}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        document.getElementById('tab-signals-table').innerHTML = html;
+    }
+
+    loadSignals();
+    window._ct_signalsInterval = setInterval(loadSignals, 15000);
+})();
+</script>

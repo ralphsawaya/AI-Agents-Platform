@@ -1,0 +1,48 @@
+<style>
+.dry-run-badge { background:#3a3a1a;color:#fbbf24;padding:2px 8px;border-radius:8px;font-size:0.75rem; }
+</style>
+
+<h3 class="mb-1">Recent Trades</h3>
+<div id="tab-trades-table">
+    <p class="text-dim">No trades executed yet.</p>
+</div>
+
+<script>
+(function() {
+    function fmtStrategy(s) {
+        if (!s) return '—';
+        return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+    function fmtTime(t) {
+        if (!t) return '—';
+        return new Date(t).toLocaleString();
+    }
+
+    async function loadTrades() {
+        const res = await API.get('/api/trading/trades?limit=30');
+        if (!res.success || !res.data.length) return;
+        let html = `<table>
+            <thead><tr><th>Time</th><th>Side</th><th>Strategy</th><th>Qty</th><th>Signal Price</th><th>Fill Price</th><th>SL</th><th>TP</th><th>Status</th></tr></thead>
+            <tbody>`;
+        for (const t of res.data) {
+            const dryBadge = t.dry_run ? ' <span class="dry-run-badge">DRY</span>' : '';
+            html += `<tr>
+                <td class="text-dim">${fmtTime(t.timestamp)}</td>
+                <td><strong>${t.side}</strong></td>
+                <td>${fmtStrategy(t.strategy_name)}</td>
+                <td>${t.quantity.toFixed(5)}</td>
+                <td>$${t.signal_price.toFixed(2)}</td>
+                <td>$${t.fill_price.toFixed(2)}</td>
+                <td class="text-dim">$${(t.stop_loss_price || 0).toFixed(2)}</td>
+                <td class="text-dim">$${(t.take_profit_price || 0).toFixed(2)}</td>
+                <td>${t.status}${dryBadge}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        document.getElementById('tab-trades-table').innerHTML = html;
+    }
+
+    loadTrades();
+    window._ct_tradesInterval = setInterval(loadTrades, 15000);
+})();
+</script>

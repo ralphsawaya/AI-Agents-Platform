@@ -49,3 +49,5 @@ async def scheduler_page(request: Request):
 @router.get("/graph", include_in_schema=False)
 async def graph_page(request: Request):
     return templates.TemplateResponse("graph.html", {"request": request})
+
+

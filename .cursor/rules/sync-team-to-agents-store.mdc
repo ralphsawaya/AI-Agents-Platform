@@ -1,0 +1,30 @@
+---
+description: Sync team code edits to the extracted copy in agents_store so the running platform picks up changes without a manual re-upload.
+globs: teams/**/*
+alwaysApply: false
+---
+
+# Sync team edits to agents_store
+
+When editing any file under `teams/<team_name>/`, also apply the same change to the corresponding file under `agent_platform/agents_store/<agent_id>/<team_name>/`.
+
+## How to find the matching agents_store copy
+
+1. Glob for `agent_platform/agents_store/**/<team_name>` to locate the extracted copy (there may be multiple agent IDs if the team was re-uploaded).
+2. Apply the identical edit to every matching copy found.
+
+## Example
+
+If you edit `teams/trading_agents/orchestrator/main.py`, also edit:
+`agent_platform/agents_store/<agent_id>/trading_agents/orchestrator/main.py`
+
+## .env files
+
+`.env` files are especially critical — they contain API keys and secrets that the platform reads at runtime from the agents_store copy. When a `.env` file is edited under `teams/<team_name>/`, **always** sync the change to the agents_store copy immediately. Missing this causes runtime auth failures.
+
+## Important
+
+- Always apply changes to **both** locations in the same response.
+- If the file doesn't exist in agents_store (e.g., a brand-new file), create it there too.
+- If deleting a file from `teams/`, delete the agents_store copy as well.
+- Do NOT modify files that only exist in agents_store and have no source in `teams/`.

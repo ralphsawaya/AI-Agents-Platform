@@ -13,6 +13,15 @@ class Settings(BaseSettings):
     PORT: int = 8000
 
     groq_api_key: str = ""
+    anthropic_api_key: str = ""
+    binance_api_key: str = ""
+    binance_api_secret: str = ""
+    tradingview_webhook_secret: str = ""
+
+    trading_enabled: bool = True
+    trading_dry_run: bool = True
+    trading_max_daily_trades: int = 50
+    trading_duplicate_window_seconds: int = 60
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

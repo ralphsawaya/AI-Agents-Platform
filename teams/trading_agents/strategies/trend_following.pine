@@ -1,0 +1,67 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © AI-Agents-Platform — Trend Following Strategy
+// Designed for BTC/USDT on 4H timeframe
+// Webhook-enabled for automated trading via TradingView alerts
+
+//@version=6
+strategy("Trend Following [AI-Agents]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.1)
+
+// ── Inputs ──────────────────────────────────────────────────────────
+emaFastLen   = input.int(9,   "EMA Fast Length",  minval=1)
+emaMidLen    = input.int(21,  "EMA Mid Length",   minval=1)
+adxLen       = input.int(14,  "ADX Length",       minval=1)
+adxThreshold = input.float(25.0, "ADX Threshold", minval=10.0, step=1.0)
+atrLen       = input.int(14,  "ATR Length",       minval=1)
+atrTrailMult = input.float(2.0, "ATR Trailing Stop Multiplier", minval=0.5, step=0.5)
+webhookSecret = input.string("", "Webhook Secret", tooltip="Shared secret for webhook authentication")
+
+// ── Calculations ────────────────────────────────────────────────────
+emaFast = ta.ema(close, emaFastLen)
+emaMid  = ta.ema(close, emaMidLen)
+atr     = ta.atr(atrLen)
+
+// ADX calculation
+[diPlus, diMinus, adxVal] = ta.dmi(adxLen, adxLen)
+
+// MACD for confirmation
+[macdLine, signalLine, macdHist] = ta.macd(close, 12, 26, 9)
+
+// ── Conditions ──────────────────────────────────────────────────────
+bullishCross = ta.crossover(emaFast, emaMid)
+bearishCross = ta.crossunder(emaFast, emaMid)
+strongTrend  = adxVal > adxThreshold
+macdBullish  = macdHist > 0
+macdBearish  = macdHist < 0
+
+// Entry conditions
+longEntry  = bullishCross and strongTrend and macdBullish
+longExit   = bearishCross or (adxVal < adxThreshold and emaFast < emaMid)
+
+// Trailing stop
+var float trailStop = na
+if strategy.position_size > 0
+    trailStop := math.max(nz(trailStop), close - atr * atrTrailMult)
+else
+    trailStop := na
+
+// ── Strategy Execution ──────────────────────────────────────────────
+if longEntry
+    strategy.entry("Long", strategy.long, alert_message='{"secret":"' + webhookSecret + '","strategy_name":"trend_following","action":"buy","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+
+if longExit and strategy.position_size > 0
+    strategy.close("Long", alert_message='{"secret":"' + webhookSecret + '","strategy_name":"trend_following","action":"sell","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+
+// Trailing stop exit
+if strategy.position_size > 0 and not na(trailStop) and close < trailStop
+    strategy.close("Long", comment="Trail Stop", alert_message='{"secret":"' + webhookSecret + '","strategy_name":"trend_following","action":"sell","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+
+// ── Plots ───────────────────────────────────────────────────────────
+plot(emaFast, "EMA Fast", color=color.blue, linewidth=2)
+plot(emaMid,  "EMA Mid",  color=color.orange, linewidth=2)
+plot(strategy.position_size > 0 ? trailStop : na, "Trail Stop", color=color.red, style=plot.style_linebr, linewidth=1)
+
+bgcolor(longEntry ? color.new(color.green, 90) : na, title="Long Entry")
+bgcolor(longExit  ? color.new(color.red, 90)   : na, title="Long Exit")
+
+// ADX and trend strength in separate pane
+// plotchar(adxVal > adxThreshold, "Strong Trend", "▲", location.bottom, color.green, size=size.tiny)
