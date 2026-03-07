@@ -1,41 +1,179 @@
 <style>
-.trading-tab-header { margin-bottom:1.25rem; }
-.trading-card { padding:16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); }
-.regime-badge { display:inline-block;padding:4px 12px;border-radius:12px;font-size:0.8rem;font-weight:600; }
-.regime-trending_up { background:#1a3a2a;color:#4ade80; }
-.regime-trending_down { background:#3a1a1a;color:#f87171; }
-.regime-ranging { background:#1a2a3a;color:#60a5fa; }
-.regime-high_volatility { background:#3a2a1a;color:#fbbf24; }
-.regime-breakout { background:#2a1a3a;color:#c084fc; }
-.regime-accumulation { background:#1a3a3a;color:#2dd4bf; }
-.kill-active { background:#ef4444 !important;color:white !important; }
-.kill-inactive { background:#22c55e !important;color:white !important; }
-.indicator-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-top:12px; }
-.indicator-item { background:var(--surface-2);padding:8px;border-radius:6px; }
-.indicator-item .label { font-size:0.75rem;color:#888; }
-.indicator-item .val { font-size:0.95rem;font-weight:600; }
+/* ── Base ── */
+.tt-section { margin-bottom:24px; }
+
+/* ── Collapsible settings ── */
+.tt-collapse { border:1px solid var(--border);border-radius:10px;background:var(--surface);margin-bottom:24px;overflow:hidden; }
+.tt-collapse-header { display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;user-select:none; }
+.tt-collapse-header:hover { background:var(--surface-2); }
+.tt-collapse-title { font-size:0.82rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:#888; }
+.tt-collapse-chevron { font-size:0.7rem;color:#666;transition:transform 0.25s; }
+.tt-collapse.open .tt-collapse-chevron { transform:rotate(180deg); }
+.tt-collapse-body { padding:0 18px 18px;display:none; }
+.tt-collapse.open .tt-collapse-body { display:block; }
+
+/* Settings inner bar (toggle + LLM) */
+.tt-settings-bar { display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:14px 16px;background:var(--surface-2);border-radius:8px;margin-bottom:16px; }
+.tt-settings-bar .tt-bar-sep { width:1px;height:24px;background:var(--border); }
+
+/* Toggle switch */
+.tt-toggle { display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none; }
+.tt-toggle-track { position:relative;width:44px;height:24px;border-radius:12px;transition:background 0.25s; }
+.tt-toggle-track.on  { background:#22c55e; }
+.tt-toggle-track.off { background:#ef4444; }
+.tt-toggle-thumb { position:absolute;top:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left 0.25s;box-shadow:0 1px 3px rgba(0,0,0,0.3); }
+.tt-toggle-track.on  .tt-toggle-thumb { left:22px; }
+.tt-toggle-track.off .tt-toggle-thumb { left:2px; }
+.tt-toggle-label { font-size:0.82rem;font-weight:600; }
+.tt-toggle-label.on  { color:#4ade80; }
+.tt-toggle-label.off { color:#f87171; }
+
+/* LLM fields */
+.tt-field { display:flex;align-items:center;gap:6px; }
+.tt-field-label { font-size:0.76rem;font-weight:500;color:#777;white-space:nowrap; }
+.tt-settings-bar select,
+.tt-settings-bar input { padding:5px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:inherit;font-size:0.84rem; }
+.tt-settings-bar select { cursor:pointer; }
+.tt-settings-bar select:focus,
+.tt-settings-bar input:focus { outline:none;border-color:var(--primary); }
+.tt-settings-bar input[type="password"] { width:200px;font-family:monospace;font-size:0.8rem; }
+
+/* Settings panels grid */
+.tt-settings-grid { display:grid;grid-template-columns:1fr 1fr;gap:16px; }
+.tt-panel { padding:16px;background:var(--surface-2);border-radius:8px; }
+.tt-panel-title { font-size:0.85rem;font-weight:700;margin-bottom:12px; }
+.tt-form-row { display:flex;align-items:center;gap:10px;margin-bottom:10px; }
+.tt-form-row:last-child { margin-bottom:0; }
+.tt-form-row label { flex:0 0 140px;font-size:0.8rem;color:#999; }
+.tt-form-row input { flex:1;padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:inherit;font-size:0.85rem; }
+.tt-form-row input:focus { outline:none;border-color:var(--primary); }
+.tt-save-row { display:flex;justify-content:flex-end;margin-top:16px; }
+.btn-save { background:var(--primary);color:#fff;border:none;padding:8px 24px;border-radius:6px;font-size:0.84rem;font-weight:600;cursor:pointer;transition:opacity 0.15s; }
+.btn-save:hover { opacity:0.88; }
+.btn-save:disabled { opacity:0.45;cursor:not-allowed; }
+
+/* ── Toolbar (just Run Analysis) ── */
+.tt-toolbar { display:flex;align-items:center;gap:12px;margin-bottom:20px; }
+.btn-analysis { background:var(--primary);color:#fff;border:none;padding:7px 18px;border-radius:6px;font-size:0.84rem;font-weight:600;cursor:pointer;transition:opacity 0.15s; }
+.btn-analysis:hover { opacity:0.88; }
+
+/* ── Stat cards row ── */
+.tt-stats { display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px; }
+.tt-stat { padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px; }
+.tt-stat .lbl { font-size:0.72rem;font-weight:500;text-transform:uppercase;letter-spacing:0.04em;color:#777;margin-bottom:6px; }
+.tt-stat .val { font-size:1.1rem;font-weight:700; }
+
+/* ── Cards (regime / risk) ── */
+.tt-card { padding:18px;background:var(--surface);border:1px solid var(--border);border-radius:10px; }
+.tt-cards-row { display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px; }
+.tt-card-title { font-size:0.88rem;font-weight:700;margin-bottom:12px; }
+
+/* Regime badge */
+.regime-badge { display:inline-block;padding:4px 14px;border-radius:12px;font-size:0.8rem;font-weight:600; }
+.regime-trending_up    { background:#1a3a2a;color:#4ade80; }
+.regime-trending_down  { background:#3a1a1a;color:#f87171; }
+.regime-ranging        { background:#1a2a3a;color:#60a5fa; }
+.regime-high_volatility{ background:#3a2a1a;color:#fbbf24; }
+.regime-breakout       { background:#2a1a3a;color:#c084fc; }
+.regime-accumulation   { background:#1a3a3a;color:#2dd4bf; }
+
+/* Indicator grid */
+.tt-ind-grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:14px; }
+.tt-ind { padding:8px 10px;background:var(--surface-2);border-radius:6px; }
+.tt-ind .lbl { font-size:0.7rem;color:#777;margin-bottom:2px; }
+.tt-ind .val { font-size:0.92rem;font-weight:600; }
+
+/* ── Misc ── */
+.text-dim { color:#777; }
+.ts-small { font-size:0.78rem;color:#666;margin-top:10px; }
 </style>
 
-<div class="trading-tab-header">
-    <div style="display:flex;gap:8px;align-items:center;">
-        <button class="btn btn-outline" id="tab-kill-switch-btn" onclick="_ct_toggleKillSwitch()">Loading…</button>
-        <button class="btn btn-primary" onclick="_ct_runAnalysis()">Run Analysis</button>
+<!-- ============ Toolbar ============ -->
+<div class="tt-toolbar">
+    <button class="btn-analysis" onclick="_ct_runAnalysis()">Run Analysis</button>
+</div>
+
+<!-- ============ Stat Cards ============ -->
+<div class="tt-stats" id="trading-stats">
+    <div class="tt-stat"><div class="lbl">Market Regime</div><div class="val text-dim">—</div></div>
+    <div class="tt-stat"><div class="lbl">Active Strategy</div><div class="val text-dim">—</div></div>
+    <div class="tt-stat"><div class="lbl">Today's Trades</div><div class="val text-dim">—</div></div>
+    <div class="tt-stat"><div class="lbl">Mode</div><div class="val text-dim">—</div></div>
+</div>
+
+<!-- ============ Regime + Risk ============ -->
+<div class="tt-cards-row">
+    <div class="tt-card">
+        <div class="tt-card-title">Current Regime</div>
+        <div id="tab-regime-detail">
+            <p class="text-dim" style="font-size:0.88rem;">No regime data yet. Run an analysis to start.</p>
+        </div>
+    </div>
+    <div class="tt-card">
+        <div class="tt-card-title">Risk State</div>
+        <div id="tab-risk-detail">
+            <p class="text-dim" style="font-size:0.88rem;">No risk data available.</p>
+        </div>
     </div>
 </div>
 
-<div class="stat-cards" id="trading-stats"></div>
-
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:8px;">
-    <div>
-        <h3 class="mb-1">Current Regime</h3>
-        <div class="trading-card" id="tab-regime-detail">
-            <p class="text-dim">No regime data yet. Run an analysis to start.</p>
-        </div>
+<!-- ============ Settings (collapsible, closed by default) ============ -->
+<div class="tt-collapse" id="tt-settings-collapse">
+    <div class="tt-collapse-header" onclick="_ct_toggleSettings()">
+        <span class="tt-collapse-title">Settings</span>
+        <span class="tt-collapse-chevron">&#9660;</span>
     </div>
-    <div>
-        <h3 class="mb-1">Risk State</h3>
-        <div class="trading-card" id="tab-risk-detail">
-            <p class="text-dim">No risk data available.</p>
+    <div class="tt-collapse-body">
+        <!-- Trading toggle + LLM config bar -->
+        <div class="tt-settings-bar">
+            <div class="tt-toggle" onclick="event.stopPropagation();_ct_toggleKillSwitch()">
+                <div class="tt-toggle-track off" id="tt-toggle-track">
+                    <div class="tt-toggle-thumb"></div>
+                </div>
+                <span class="tt-toggle-label off" id="tt-toggle-text">Loading…</span>
+            </div>
+            <div class="tt-bar-sep"></div>
+            <div class="tt-field">
+                <span class="tt-field-label">Provider</span>
+                <select id="cfg-llm-provider" onchange="_ct_onProviderChange()">
+                    <option value="gemini">Google Gemini</option>
+                    <option value="claude">Anthropic Claude</option>
+                    <option value="deepseek">DeepSeek</option>
+                </select>
+            </div>
+            <div class="tt-field">
+                <span class="tt-field-label">Model</span>
+                <select id="cfg-llm-model"></select>
+            </div>
+            <div class="tt-field">
+                <span class="tt-field-label" id="cfg-api-key-label">API Key</span>
+                <input type="password" id="cfg-api-key" placeholder="Enter API key" autocomplete="off" />
+            </div>
+        </div>
+
+        <!-- Risk + Indicator panels -->
+        <div class="tt-settings-grid">
+            <div class="tt-panel">
+                <div class="tt-panel-title">Risk Defaults</div>
+                <div class="tt-form-row"><label>Max Risk / Trade</label><input type="number" id="cfg-max-risk" step="0.005" min="0.005" max="0.5" /></div>
+                <div class="tt-form-row"><label>Max Open Positions</label><input type="number" id="cfg-max-positions" step="1" min="1" max="50" /></div>
+                <div class="tt-form-row"><label>Max Drawdown</label><input type="number" id="cfg-max-drawdown" step="0.01" min="0.01" max="1.0" /></div>
+            </div>
+            <div class="tt-panel">
+                <div class="tt-panel-title">Indicator Periods</div>
+                <div class="tt-form-row"><label>ADX Period</label><input type="number" id="cfg-adx" step="1" min="2" max="100" /></div>
+                <div class="tt-form-row"><label>ATR Period</label><input type="number" id="cfg-atr" step="1" min="2" max="100" /></div>
+                <div class="tt-form-row"><label>BB Period</label><input type="number" id="cfg-bb-period" step="1" min="2" max="100" /></div>
+                <div class="tt-form-row"><label>BB Std Dev</label><input type="number" id="cfg-bb-std" step="0.1" min="0.5" max="5.0" /></div>
+                <div class="tt-form-row"><label>EMA Fast</label><input type="number" id="cfg-ema-fast" step="1" min="2" max="200" /></div>
+                <div class="tt-form-row"><label>EMA Mid</label><input type="number" id="cfg-ema-mid" step="1" min="2" max="200" /></div>
+                <div class="tt-form-row"><label>EMA Slow</label><input type="number" id="cfg-ema-slow" step="1" min="2" max="200" /></div>
+                <div class="tt-form-row"><label>RSI Period</label><input type="number" id="cfg-rsi" step="1" min="2" max="100" /></div>
+                <div class="tt-form-row"><label>Volume MA Period</label><input type="number" id="cfg-vol-ma" step="1" min="2" max="100" /></div>
+            </div>
+        </div>
+        <div class="tt-save-row">
+            <button class="btn-save" id="cfg-save-btn" onclick="_ct_saveConfig()">Save Settings</button>
         </div>
     </div>
 </div>
@@ -43,6 +181,20 @@
 <script>
 (function() {
     let _tradingEnabled = true;
+
+    const PROVIDER_MODELS = {
+        gemini:   ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+        claude:   ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"],
+        deepseek: ["deepseek-chat", "deepseek-reasoner"],
+    };
+
+    const PROVIDER_KEY_LABELS = {
+        gemini: "Gemini Key",
+        claude: "Claude Key",
+        deepseek: "DeepSeek Key",
+    };
+
+    let _loadedApiKeys = {};
 
     function fmtStrategy(s) {
         if (!s) return '—';
@@ -53,37 +205,156 @@
         return new Date(t).toLocaleString();
     }
 
+    // ── Collapse toggle ──
+
+    window._ct_toggleSettings = function() {
+        document.getElementById('tt-settings-collapse').classList.toggle('open');
+    };
+
+    // ── Kill-switch toggle ──
+
+    function renderToggle(enabled) {
+        const track = document.getElementById('tt-toggle-track');
+        const label = document.getElementById('tt-toggle-text');
+        track.className = 'tt-toggle-track ' + (enabled ? 'on' : 'off');
+        label.className = 'tt-toggle-label ' + (enabled ? 'on' : 'off');
+        label.textContent = enabled ? 'Trading ON' : 'Trading OFF';
+    }
+
+    window._ct_toggleKillSwitch = async function() {
+        const newState = !_tradingEnabled;
+        const res = await API.post('/api/trading/toggle', { enabled: newState });
+        if (res.success) {
+            toast(newState ? 'Trading ENABLED' : 'Trading DISABLED', newState ? 'success' : 'error');
+            loadStatus();
+        }
+    };
+
+    // ── LLM dropdowns ──
+
+    function populateModels(provider, selectedModel) {
+        const sel = document.getElementById('cfg-llm-model');
+        sel.innerHTML = '';
+        (PROVIDER_MODELS[provider] || []).forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            if (m === selectedModel) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    function updateApiKeyField(provider) {
+        document.getElementById('cfg-api-key-label').textContent = PROVIDER_KEY_LABELS[provider] || 'API Key';
+        const inp = document.getElementById('cfg-api-key');
+        const masked = _loadedApiKeys[provider] || '';
+        inp.value = masked;
+        inp.placeholder = masked ? '' : 'Enter API key';
+    }
+
+    window._ct_onProviderChange = function() {
+        const p = document.getElementById('cfg-llm-provider').value;
+        populateModels(p, PROVIDER_MODELS[p]?.[0] || '');
+        updateApiKeyField(p);
+    };
+
+    // ── Load config ──
+
+    async function loadConfig() {
+        const res = await API.get('/api/trading/config');
+        if (!res.success || !res.data) return;
+        const c = res.data;
+
+        _loadedApiKeys = c.api_keys || {};
+        const provider = c.llm_provider || 'gemini';
+        document.getElementById('cfg-llm-provider').value = provider;
+        populateModels(provider, c.llm_model || '');
+        updateApiKeyField(provider);
+
+        const rd = c.risk_defaults || {};
+        document.getElementById('cfg-max-risk').value      = rd.max_risk_per_trade ?? 0.02;
+        document.getElementById('cfg-max-positions').value  = rd.max_open_positions ?? 3;
+        document.getElementById('cfg-max-drawdown').value   = rd.max_drawdown ?? 0.10;
+
+        const ip = c.indicator_periods || {};
+        document.getElementById('cfg-adx').value       = ip.adx_period ?? 14;
+        document.getElementById('cfg-atr').value       = ip.atr_period ?? 14;
+        document.getElementById('cfg-bb-period').value = ip.bb_period ?? 20;
+        document.getElementById('cfg-bb-std').value    = ip.bb_std ?? 2.0;
+        document.getElementById('cfg-ema-fast').value  = ip.ema_fast ?? 9;
+        document.getElementById('cfg-ema-mid').value   = ip.ema_mid ?? 21;
+        document.getElementById('cfg-ema-slow').value  = ip.ema_slow ?? 50;
+        document.getElementById('cfg-rsi').value       = ip.rsi_period ?? 14;
+        document.getElementById('cfg-vol-ma').value    = ip.volume_ma_period ?? 20;
+    }
+
+    // ── Save config ──
+
+    window._ct_saveConfig = async function() {
+        const btn = document.getElementById('cfg-save-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving…';
+
+        const provider  = document.getElementById('cfg-llm-provider').value;
+        const apiKeyVal = document.getElementById('cfg-api-key').value.trim();
+        const apiKeys   = {};
+        if (apiKeyVal && !apiKeyVal.startsWith('••••')) apiKeys[provider] = apiKeyVal;
+
+        const body = {
+            trading_enabled: _tradingEnabled,
+            llm_provider: provider,
+            llm_model:    document.getElementById('cfg-llm-model').value,
+            api_keys:     Object.keys(apiKeys).length ? apiKeys : undefined,
+            risk_defaults: {
+                max_risk_per_trade: parseFloat(document.getElementById('cfg-max-risk').value),
+                max_open_positions: parseInt(document.getElementById('cfg-max-positions').value, 10),
+                max_drawdown:       parseFloat(document.getElementById('cfg-max-drawdown').value),
+            },
+            indicator_periods: {
+                adx_period:       parseInt(document.getElementById('cfg-adx').value, 10),
+                atr_period:       parseInt(document.getElementById('cfg-atr').value, 10),
+                bb_period:        parseInt(document.getElementById('cfg-bb-period').value, 10),
+                bb_std:           parseFloat(document.getElementById('cfg-bb-std').value),
+                ema_fast:         parseInt(document.getElementById('cfg-ema-fast').value, 10),
+                ema_mid:          parseInt(document.getElementById('cfg-ema-mid').value, 10),
+                ema_slow:         parseInt(document.getElementById('cfg-ema-slow').value, 10),
+                rsi_period:       parseInt(document.getElementById('cfg-rsi').value, 10),
+                volume_ma_period: parseInt(document.getElementById('cfg-vol-ma').value, 10),
+            },
+        };
+
+        const res = await API.put('/api/trading/config', body);
+        btn.disabled = false;
+        btn.textContent = 'Save Settings';
+        if (res.success) { toast('Settings saved', 'success'); loadConfig(); }
+        else { toast('Failed to save: ' + (res.error || 'unknown'), 'error'); }
+    };
+
+    // ── Dashboard loaders ──
+
     async function loadStatus() {
         const res = await API.get('/api/webhook/tradingview/status');
         if (!res.success) return;
         const d = res.data;
         _tradingEnabled = d.trading_enabled;
-
-        const killBtn = document.getElementById('tab-kill-switch-btn');
-        if (d.trading_enabled) {
-            killBtn.textContent = 'Trading: ON';
-            killBtn.className = 'btn kill-inactive';
-        } else {
-            killBtn.textContent = 'Trading: OFF';
-            killBtn.className = 'btn kill-active';
-        }
+        renderToggle(d.trading_enabled);
 
         document.getElementById('trading-stats').innerHTML = `
-            <div class="stat-card">
-                <div class="label">Market Regime</div>
-                <div class="value regime-badge regime-${d.current_regime || ''}" style="font-size:1rem;">${d.current_regime || '—'}</div>
+            <div class="tt-stat">
+                <div class="lbl">Market Regime</div>
+                <div class="val"><span class="regime-badge regime-${d.current_regime || ''}">${d.current_regime || '—'}</span></div>
             </div>
-            <div class="stat-card">
-                <div class="label">Active Strategy</div>
-                <div class="value" style="font-size:1rem;">${fmtStrategy(d.active_strategy)}</div>
+            <div class="tt-stat">
+                <div class="lbl">Active Strategy</div>
+                <div class="val">${fmtStrategy(d.active_strategy)}</div>
             </div>
-            <div class="stat-card">
-                <div class="label">Today's Trades</div>
-                <div class="value">${d.today_trades} / ${d.max_daily_trades}</div>
+            <div class="tt-stat">
+                <div class="lbl">Today's Trades</div>
+                <div class="val">${d.today_trades} / ${d.max_daily_trades}</div>
             </div>
-            <div class="stat-card">
-                <div class="label">Mode</div>
-                <div class="value" style="font-size:1rem;color:${d.dry_run ? '#fbbf24' : '#ef4444'};">${d.dry_run ? 'DRY RUN' : 'LIVE'}</div>
+            <div class="tt-stat">
+                <div class="lbl">Mode</div>
+                <div class="val" style="color:${d.dry_run ? '#fbbf24' : '#ef4444'};">${d.dry_run ? 'DRY RUN' : 'LIVE'}</div>
             </div>
         `;
     }
@@ -97,22 +368,22 @@
         document.getElementById('tab-regime-detail').innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;">
                 <span class="regime-badge regime-${d.regime}">${d.regime}</span>
-                <span class="text-dim" style="font-size:0.85rem;">Confidence: ${(d.confidence * 100).toFixed(0)}%</span>
+                <span class="text-dim" style="font-size:0.82rem;">Confidence: ${(d.confidence * 100).toFixed(0)}%</span>
             </div>
-            <p style="margin-top:10px;font-size:0.9rem;color:#ccc;">${d.reasoning || ''}</p>
-            <div class="indicator-grid">
-                <div class="indicator-item"><div class="label">ADX</div><div class="val">${ind.adx || '—'}</div></div>
-                <div class="indicator-item"><div class="label">ATR</div><div class="val">${ind.atr || '—'}</div></div>
-                <div class="indicator-item"><div class="label">RSI</div><div class="val">${ind.rsi || '—'}</div></div>
-                <div class="indicator-item"><div class="label">BB Width</div><div class="val">${ind.bb_width || '—'}</div></div>
-                <div class="indicator-item"><div class="label">EMA(9)</div><div class="val">${ind.ema_fast || '—'}</div></div>
-                <div class="indicator-item"><div class="label">EMA(21)</div><div class="val">${ind.ema_mid || '—'}</div></div>
-                <div class="indicator-item"><div class="label">EMA(50)</div><div class="val">${ind.ema_slow || '—'}</div></div>
-                <div class="indicator-item"><div class="label">MACD Hist</div><div class="val">${ind.macd_hist || '—'}</div></div>
-                <div class="indicator-item"><div class="label">Volume</div><div class="val">${ind.volume_ratio ? ind.volume_ratio + 'x' : '—'}</div></div>
-                <div class="indicator-item"><div class="label">Price</div><div class="val">$${ind.current_price || '—'}</div></div>
+            <p style="margin-top:10px;font-size:0.86rem;color:#bbb;line-height:1.5;">${d.reasoning || ''}</p>
+            <div class="tt-ind-grid">
+                <div class="tt-ind"><div class="lbl">ADX</div><div class="val">${ind.adx ?? '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">ATR</div><div class="val">${ind.atr ?? '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">RSI</div><div class="val">${ind.rsi ?? '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">BB Width</div><div class="val">${ind.bb_width ?? '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">EMA(9)</div><div class="val">${ind.ema_fast ?? '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">EMA(21)</div><div class="val">${ind.ema_mid ?? '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">EMA(50)</div><div class="val">${ind.ema_slow ?? '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">MACD Hist</div><div class="val">${ind.macd_hist ?? '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">Volume</div><div class="val">${ind.volume_ratio ? ind.volume_ratio + 'x' : '—'}</div></div>
+                <div class="tt-ind"><div class="lbl">Price</div><div class="val">$${ind.current_price ?? '—'}</div></div>
             </div>
-            <div class="text-dim" style="margin-top:8px;font-size:0.8rem;">Updated: ${fmtTime(d.timestamp)}</div>
+            <div class="ts-small">Updated: ${fmtTime(d.timestamp)}</div>
         `;
     }
 
@@ -121,26 +392,17 @@
         if (!res.success || !res.data) return;
         const d = res.data;
         document.getElementById('tab-risk-detail').innerHTML = `
-            <div class="indicator-grid">
-                <div class="indicator-item"><div class="label">Portfolio</div><div class="val">$${(d.current_portfolio || 0).toFixed(2)}</div></div>
-                <div class="indicator-item"><div class="label">Peak</div><div class="val">$${(d.peak_portfolio || 0).toFixed(2)}</div></div>
-                <div class="indicator-item"><div class="label">Drawdown</div><div class="val">${((d.current_drawdown || 0) * 100).toFixed(1)}%</div></div>
+            <div class="tt-ind-grid">
+                <div class="tt-ind"><div class="lbl">Portfolio</div><div class="val">$${(d.current_portfolio || 0).toFixed(2)}</div></div>
+                <div class="tt-ind"><div class="lbl">Peak</div><div class="val">$${(d.peak_portfolio || 0).toFixed(2)}</div></div>
+                <div class="tt-ind"><div class="lbl">Drawdown</div><div class="val">${((d.current_drawdown || 0) * 100).toFixed(1)}%</div></div>
             </div>
-            <div class="text-dim" style="margin-top:8px;font-size:0.8rem;">Updated: ${fmtTime(d.updated_at)}</div>
+            <div class="ts-small">Updated: ${fmtTime(d.updated_at)}</div>
         `;
     }
 
-    window._ct_toggleKillSwitch = async function() {
-        const newState = !_tradingEnabled;
-        const res = await API.post('/api/trading/toggle', { enabled: newState });
-        if (res.success) {
-            toast(newState ? 'Trading ENABLED' : 'Trading DISABLED', newState ? 'success' : 'error');
-            loadStatus();
-        }
-    };
-
     window._ct_runAnalysis = async function() {
-        const res = await API.post('/api/trading/run-analysis');
+        const res = await API.post('/api/trading/run-analysis', { agent_id: typeof AGENT_ID !== 'undefined' ? AGENT_ID : undefined });
         if (res.success) {
             toast('Analysis pipeline triggered', 'success');
             if (typeof loadRuns === 'function') loadRuns(1);
@@ -152,6 +414,7 @@
 
     function loadAll() { loadStatus(); loadRegime(); loadRisk(); }
     loadAll();
+    loadConfig();
     window._ct_tradingInterval = setInterval(loadAll, 15000);
 })();
 </script>

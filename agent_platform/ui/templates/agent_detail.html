@@ -102,12 +102,6 @@
 <div class="tab-content" id="tab-runs">
     <div id="runs-table">Loading…</div>
     <div class="pagination" id="runs-pagination"></div>
-    <div class="mt-1">
-        <div id="log-viewer-section" style="display:none">
-            <h3 class="mb-1">Log Output</h3>
-            <div class="log-viewer" id="log-viewer"></div>
-        </div>
-    </div>
 </div>
 
 <!-- Schedules -->
@@ -120,6 +114,11 @@
 
 <!-- Danger Zone -->
 <div class="tab-content" id="tab-danger">
+    <div class="danger-zone" style="margin-bottom:20px;">
+        <h3>Rebuild Virtual Environment</h3>
+        <p class="text-dim text-sm mb-1">Re-install all dependencies from requirements.txt. Use this after adding new packages.</p>
+        <button class="btn btn-outline" onclick="forceRebuildVenv()">Rebuild Venv</button>
+    </div>
     <div class="danger-zone">
         <h3>Delete Agent</h3>
         <p class="text-dim text-sm mb-1">This will permanently remove the agent, all run history, schedules, and uploaded files. This cannot be undone.</p>
@@ -306,6 +305,13 @@ async function rebuildVenv() {
     else toast(res.error, 'error');
 }
 
+async function forceRebuildVenv() {
+    if (!confirm('Rebuild the virtual environment? This will re-install all dependencies.')) return;
+    const res = await API.post(`/api/agents/${AGENT_ID}/rebuild?force=true`);
+    if (res.success) { toast('Venv rebuild started', 'success'); loadAgent(); }
+    else toast(res.error, 'error');
+}
+
 async function loadFileTree() {
     const res = await API.get(`/api/agents/${AGENT_ID}/files`);
     if (!res.success) return;
@@ -352,10 +358,11 @@ async function loadFile(path) {
 
 async function loadRuns(page) {
     currentRunsPage = page || 1;
-    const res = await API.get(`/api/agents/${AGENT_ID}/runs?page=${currentRunsPage}`);
+    const res = await API.get(`/api/agents/${AGENT_ID}/runs?page=${currentRunsPage}&page_size=15`);
     if (!res.success) return;
     const {runs, total, page_size} = res.data;
-    const totalPages = Math.ceil(total / page_size);
+    const capped = Math.min(total, 100);
+    const totalPages = Math.ceil(capped / page_size);
 
     if (!runs.length) {
         document.getElementById('runs-table').innerHTML = '<p class="text-dim">No runs yet.</p>';
@@ -364,7 +371,7 @@ async function loadRuns(page) {
     document.getElementById('runs-table').innerHTML = `<table>
         <thead><tr><th>Run ID</th><th>Status</th><th>Triggered</th><th>Duration</th><th>Started</th><th></th></tr></thead>
         <tbody>${runs.map(r => `
-            <tr>
+            <tr id="run-row-${r._id}">
                 <td class="mono text-sm">${r._id.substring(0,8)}…</td>
                 <td>${statusBadge(r.status)}</td>
                 <td>${r.triggered_by}</td>
@@ -385,16 +392,30 @@ async function loadRuns(page) {
     document.getElementById('runs-pagination').innerHTML = pag;
 }
 
-async function viewLog(runId) {
-    const section = document.getElementById('log-viewer-section');
-    section.style.display = 'block';
-    const viewer = document.getElementById('log-viewer');
-    viewer.textContent = 'Loading…';
+let _openLogRunId = null;
 
+async function viewLog(runId) {
+    const prev = document.getElementById('inline-log-row');
+    if (prev) prev.remove();
+
+    if (_openLogRunId === runId) { _openLogRunId = null; return; }
+    _openLogRunId = runId;
+
+    const targetRow = document.getElementById(`run-row-${runId}`);
+    if (!targetRow) return;
+
+    const colCount = targetRow.children.length;
+    const logRow = document.createElement('tr');
+    logRow.id = 'inline-log-row';
+    logRow.innerHTML = `<td colspan="${colCount}" style="padding:0;">
+        <div class="log-viewer" id="inline-log-viewer" style="margin:8px 4px;">Loading…</div>
+    </td>`;
+    targetRow.after(logRow);
+
+    const viewer = document.getElementById('inline-log-viewer');
     const res = await API.get(`/api/runs/${runId}/logs`);
     viewer.textContent = res.success ? (res.data.logs || '(empty)') : res.error;
 
-    // If run is active, connect WebSocket for live tail
     const runRes = await API.get(`/api/runs/${runId}`);
     if (runRes.success && runRes.data.status === 'running') {
         connectWS(`/ws/logs/${runId}`, (data) => {

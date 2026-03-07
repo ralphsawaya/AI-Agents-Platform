@@ -32,11 +32,14 @@ class RunRepository:
     async def get_by_id(self, run_id: str) -> dict[str, Any] | None:
         return await self._col.find_one({"_id": run_id})
 
+    MAX_RUNS_RETURNED = 100
+
     async def list_by_agent(
-        self, agent_id: str, page: int = 1, page_size: int = 20
+        self, agent_id: str, page: int = 1, page_size: int = 15
     ) -> tuple[list[dict[str, Any]], int]:
         query = {"agent_id": agent_id}
         total = await self._col.count_documents(query)
+        capped = min(total, self.MAX_RUNS_RETURNED)
         cursor = (
             self._col.find(query)
             .sort("start_time", -1)
@@ -44,7 +47,7 @@ class RunRepository:
             .limit(page_size)
         )
         docs = await cursor.to_list(length=page_size)
-        return docs, total
+        return docs, capped
 
     async def update_status(
         self,

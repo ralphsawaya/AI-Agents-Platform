@@ -97,13 +97,16 @@ async def get_file_content(agent_id: str, file_path: str):
 
 
 @router.post("/{agent_id}/rebuild")
-async def rebuild_venv(agent_id: str):
-    """Re-trigger the venv build for an agent (e.g. after a stuck or failed build)."""
+async def rebuild_venv(agent_id: str, force: bool = Query(False)):
+    """Re-trigger the venv build for an agent (e.g. after a stuck or failed build).
+
+    Pass ?force=true to rebuild even when the venv is already ready.
+    """
     agent = await agent_manager.get_agent(agent_id)
     if not agent:
         return _err("Agent not found", 404)
-    if agent.get("venv_ready"):
-        return _err("Venv is already built")
+    if agent.get("venv_ready") and not force:
+        return _err("Venv is already built — use ?force=true to rebuild anyway")
 
     from agent_platform.db.client import get_database
     from agent_platform.db.repositories.agent_repo import AgentRepository

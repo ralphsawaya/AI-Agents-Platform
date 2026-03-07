@@ -50,7 +50,7 @@ async def stop_agent_run(run_id: str):
 async def list_runs(
     agent_id: str,
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(15, ge=1, le=100),
 ):
     db = get_database()
     repo = RunRepository(db)

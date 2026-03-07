@@ -44,6 +44,12 @@ async def lifespan(app: FastAPI):
     await scheduler_service.start(db)
     await monitor_service.start()
 
+    # Load persisted trading config from MongoDB
+    trading_cfg = await db["trading_config"].find_one({"_id": "default"})
+    if trading_cfg and "trading_enabled" in trading_cfg:
+        settings.trading_enabled = trading_cfg["trading_enabled"]
+        logger.info("Loaded trading_enabled=%s from MongoDB", settings.trading_enabled)
+
     # Recover any builds that were interrupted (e.g. by a server restart)
     from agent_platform.db.repositories.agent_repo import AgentRepository
     agent_repo = AgentRepository(db)

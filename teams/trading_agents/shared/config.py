@@ -2,7 +2,12 @@
 
 import os
 
+# --- LLM provider keys ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "4096"))
@@ -32,3 +37,51 @@ EMA_MID = 21
 EMA_SLOW = 50
 RSI_PERIOD = 14
 VOLUME_MA_PERIOD = 20
+
+# Available LLM models per provider
+LLM_PROVIDERS = {
+    "gemini": {
+        "label": "Google Gemini",
+        "models": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
+        "default": "gemini-2.5-flash",
+    },
+    "claude": {
+        "label": "Anthropic Claude",
+        "models": ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"],
+        "default": "claude-sonnet-4-20250514",
+    },
+    "deepseek": {
+        "label": "DeepSeek",
+        "models": ["deepseek-chat", "deepseek-reasoner"],
+        "default": "deepseek-chat",
+    },
+}
+
+# Defaults schema — used as fallback when MongoDB has no trading_config document
+RISK_DEFAULTS = {
+    "max_risk_per_trade": MAX_RISK_PER_TRADE,
+    "max_open_positions": MAX_OPEN_POSITIONS,
+    "max_drawdown": MAX_DRAWDOWN,
+}
+
+INDICATOR_DEFAULTS = {
+    "adx_period": ADX_PERIOD,
+    "atr_period": ATR_PERIOD,
+    "bb_period": BB_PERIOD,
+    "bb_std": BB_STD,
+    "ema_fast": EMA_FAST,
+    "ema_mid": EMA_MID,
+    "ema_slow": EMA_SLOW,
+    "rsi_period": RSI_PERIOD,
+    "volume_ma_period": VOLUME_MA_PERIOD,
+}
+
+
+def get_trading_config_defaults() -> dict:
+    """Return the full default trading config dict."""
+    return {
+        "llm_provider": LLM_PROVIDER,
+        "llm_model": LLM_MODEL,
+        "risk_defaults": dict(RISK_DEFAULTS),
+        "indicator_periods": dict(INDICATOR_DEFAULTS),
+    }

@@ -248,10 +248,10 @@ Summary cards (total teams, running, scheduled, errored), card/table toggle, sea
 Tabbed interface with standard tabs for all teams, plus optional custom tabs per team:
 - **Overview** — stat cards, detected LangGraph nodes (indigo pills), tools (green pills), agent folders (amber pills), rendered Markdown description, and interactive pipeline graph
 - **Files** — read-only source file browser with syntax highlighting (excludes `.venv`, caches, and build artifacts)
-- **Runs** — paginated run history with log viewer and live WebSocket tail
+- **Runs** — paginated run history (15 per page, last 100 runs) with inline log viewer and live WebSocket tail
 - **Schedules** — create/edit/delete cron, interval, or one-time schedules
-- **Custom Tabs** — team-specific tabs loaded as plugins from `ui/tabs/` in the team package (e.g. the trading team ships Trading, Trades, Signals, and Strategy tabs)
-- **Danger Zone** — permanent deletion with confirmation
+- **Custom Tabs** — team-specific tabs loaded as plugins from `ui/tabs/` in the team package (e.g. the trading team ships Trading, Trades, Signals, and Strategy tabs with LLM provider selection, risk parameters, and trading settings persisted to MongoDB)
+- **Danger Zone** — rebuild virtual environment (re-install dependencies) and permanent deletion with confirmation
 
 ### Monitor
 Live table of all running agent teams showing CPU%, memory (MB), elapsed time, and last log line. Fixed-layout table with no flicker. Updates in real time via WebSocket with 20-second REST fallback polling.
@@ -280,7 +280,7 @@ All settings are in `agent_platform/config.py` and overridable via `.env`:
 | `BINANCE_API_KEY` | *(empty)* | For the trading agents team |
 | `BINANCE_API_SECRET` | *(empty)* | For the trading agents team |
 | `TRADINGVIEW_WEBHOOK_SECRET` | *(empty)* | Webhook authentication secret |
-| `TRADING_ENABLED` | `true` | Global trading kill switch |
+| `TRADING_ENABLED` | `true` | Global trading kill switch (also persisted to MongoDB via Trading tab settings) |
 | `TRADING_DRY_RUN` | `true` | Simulate trades without real orders |
 | `TRADING_MAX_DAILY_TRADES` | `50` | Daily trade limit |
 

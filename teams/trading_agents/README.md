@@ -18,7 +18,7 @@ Runs every 5 minutes via APScheduler.
 Analyst --> Strategist --> END
 ```
 
-1. **The Analyst** pulls 4H and 1H BTC/USDT candles from Binance, computes technical indicators (ADX, ATR, Bollinger Bands, EMAs, RSI, MACD, volume ratios), and asks Gemini to classify the current market regime as one of:
+1. **The Analyst** pulls 4H and 1H BTC/USDT candles from Binance, computes technical indicators (ADX, ATR, Bollinger Bands, EMAs, RSI, MACD, volume ratios), and asks the configured LLM to classify the current market regime as one of:
    - `trending_up` — strong uptrend, ADX > 25, EMA alignment bullish
    - `trending_down` — strong downtrend, ADX > 25, EMA alignment bearish
    - `ranging` — low ADX, narrow Bollinger Bands, sideways price action
@@ -33,7 +33,7 @@ Analyst --> Strategist --> END
    - Breakout --> `trend_following` (ride the momentum after the break)
    - Accumulation --> `mean_reversion` (profit from the tight range while awaiting breakout)
 
-   For edge cases (low confidence, regime transitions), Gemini provides a second opinion before committing. The active strategy is stored in MongoDB.
+   For edge cases (low confidence, regime transitions), the LLM provides a second opinion before committing. The active strategy is stored in MongoDB.
 
 ### Pipeline 2 — Execution Flow (Event-Driven)
 
@@ -108,9 +108,9 @@ The `compute_indicators` node runs the 4H candles through the Python `ta` librar
 | Volume | Volume ratio (current volume vs. 20-period moving average) |
 | Price | Current price |
 
-### Stage 3 — Gemini classifies the regime
+### Stage 3 — LLM classifies the regime
 
-All 19 indicators are formatted into a structured prompt and sent to Gemini. Gemini reads the numbers and returns:
+All 19 indicators are formatted into a structured prompt and sent to the configured LLM (Google Gemini, Anthropic Claude, or DeepSeek — selectable from the Trading tab settings). The LLM reads the numbers and returns:
 - **Regime** — one of `trending_up`, `trending_down`, `ranging`, `high_volatility`, `breakout`, `accumulation`
 - **Confidence** — 0–100%
 - **Reasoning** — a natural-language explanation of the classification
@@ -131,12 +131,12 @@ The result is stored in MongoDB's `market_regimes` collection and used by the St
 ```
 trading_agents/
 ├── shared/                    Shared code across all agents
-│   ├── llm.py                 Google Gemini wrapper
+│   ├── llm.py                 Multi-provider LLM wrapper (Gemini, Claude, DeepSeek)
 │   ├── binance_client.py      Binance Spot API wrapper
 │   ├── indicators.py          Technical indicator calculations (ta library)
 │   ├── models.py              Data models (MarketRegime, TradeSignal, RiskParams, etc.)
-│   ├── config.py              Trading pair, risk limits, indicator periods
-│   ├── mongo.py               MongoDB collection accessors
+│   ├── config.py              Trading pair, risk limits, indicator periods, LLM providers
+│   ├── mongo.py               MongoDB helpers + trading config loaders
 │   ├── logger.py              Logging config
 │   └── utils.py               AGENT_ARGS loader
 ├── agent_analyst/             Market regime classification
@@ -175,7 +175,7 @@ trading_agents/
 ├── ui/                        Custom tabs plugin (loaded on the agent detail page)
 │   ├── tabs.json              Tab definitions (Trading, Trades, Signals, Strategy)
 │   └── tabs/
-│       ├── trading.html       Kill switch, regime overview, risk state, indicators
+│       ├── trading.html       Dashboard (regime, risk, stats) + Settings (LLM, risk, indicators)
 │       ├── trades.html        Recent executed trades table
 │       ├── signals.html       Recent trade signals table
 │       └── strategy.html      Strategy selection history
@@ -191,18 +191,32 @@ trading_agents/
 
 ## Configuration
 
-All configuration is injected via environment variables by the platform (AI-Agents-Platform/teams/trading_agents/shared/config.py):
+Settings can be configured in two ways:
+
+1. **Trading tab Settings panel** (recommended) — expand the Settings section at the bottom of the Trading tab to select the LLM provider/model, enter API keys, and adjust risk and indicator parameters. Click **Save Settings** to persist everything to MongoDB. These settings survive server restarts.
+2. **Environment variables** — set in `.env` as fallback defaults. MongoDB settings take precedence when present.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `GEMINI_API_KEY` | Google Gemini API key for Analyst and Strategist | (required) |
+| `LLM_PROVIDER` | LLM provider (`gemini`, `claude`, or `deepseek`) | `gemini` |
+| `LLM_MODEL` | Model ID for the selected provider | `gemini-2.5-flash` |
+| `GEMINI_API_KEY` | Google Gemini API key | (required if using Gemini) |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API key | (required if using Claude) |
+| `DEEPSEEK_API_KEY` | DeepSeek API key | (required if using DeepSeek) |
 | `BINANCE_API_KEY` | Binance Spot API key | (required) |
 | `BINANCE_API_SECRET` | Binance Spot API secret | (required) |
 | `TRADING_PAIR` | Symbol to trade | `BTCUSDT` |
 | `MAX_RISK_PER_TRADE` | Fraction of portfolio risked per trade | `0.02` (2%) |
 | `MAX_OPEN_POSITIONS` | Maximum concurrent positions | `3` |
 | `MAX_DRAWDOWN` | Pause trading above this drawdown | `0.10` (10%) |
-| `LLM_MODEL` | Google Gemini model ID | `gemini-2.5-flash` |
+
+### Supported LLM Providers
+
+| Provider | Models | Notes |
+|----------|--------|-------|
+| Google Gemini | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash` | Free tier available |
+| Anthropic Claude | `claude-sonnet-4-20250514`, `claude-3-5-haiku-20241022` | Paid API |
+| DeepSeek | `deepseek-chat`, `deepseek-reasoner` | Paid API (very low cost) |
 
 ## Running
 
@@ -231,7 +245,7 @@ When TradingView fires a webhook to `POST /api/webhook/tradingview`, the platfor
 ## Safety
 
 - **Dry-run mode** is enabled by default. Set `TRADING_DRY_RUN=false` in `.env` to execute real trades.
-- **Kill switch** on the Trading tab instantly disables all trading.
+- **Kill switch** on the Trading tab instantly disables all trading. State is persisted to MongoDB when Save Settings is clicked.
 - **Duplicate detection** ignores identical signals within a 60-second window.
 - **Daily trade cap** prevents runaway execution (default: 50 trades/day).
 - **Drawdown limit** pauses trading if portfolio drops more than 10% from peak.

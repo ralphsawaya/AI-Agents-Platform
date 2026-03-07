@@ -36,7 +36,7 @@ async def create_venv(agent_id: str, agent_path: str) -> None:
         logger.info("Creating venv for agent %s at %s", agent_id, venv_dir)
 
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "venv", str(venv_dir),
+            sys.executable, "-m", "venv", "--clear", str(venv_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
