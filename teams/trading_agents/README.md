@@ -33,17 +33,22 @@ Analyst --> Strategist --> END
 
 ### Pipeline 2 — Execution Flow (Event-Driven)
 
-Triggered by a TradingView webhook when any Pine Script strategy fires.
+Triggered automatically by a TradingView webhook — **not meant to be run manually**.
 
 ```
 Risk Manager --> Executor --> END
 ```
 
-1. The platform's webhook endpoint receives the alert and checks whether the signal's `strategy_name` matches the currently active strategy. Mismatched signals are logged but ignored.
+The execution pipeline is a **one-shot** process that handles a single trade signal and exits. The listening happens at the platform level, not inside the agent team:
 
-2. **The Risk Manager** fetches the Binance account balance, calculates ATR-based position sizing at 2% risk per trade, checks drawdown limits (10% max), verifies open position caps (3 max), and either approves or rejects the trade.
+1. The platform's webhook endpoint (`POST /api/webhook/tradingview`) is always listening as long as the server is running.
+2. When TradingView fires a webhook, the platform validates the secret, checks the kill switch, deduplicates the signal, and matches the signal's `strategy_name` against the currently active strategy. Mismatched signals are logged but ignored.
+3. If the signal matches, the platform **spawns** the execution pipeline as a subprocess for that specific signal.
+4. **The Risk Manager** fetches the Binance account balance, calculates ATR-based position sizing at 2% risk per trade, checks drawdown limits (10% max), verifies open position caps (3 max), and either approves or rejects the trade.
+5. **The Executor** places a market order on Binance Spot, polls for confirmation, records the fill in MongoDB, and sets an OCO stop-loss / take-profit order.
+6. The pipeline exits. The next webhook will spawn a new execution pipeline.
 
-3. **The Executor** places a market order on Binance Spot, polls for confirmation, records the fill in MongoDB, and sets an OCO stop-loss / take-profit order.
+> **Note:** Running execution mode manually from the UI will exit immediately because no signal data is provided. This is expected — execution is designed to be triggered by webhooks, not by the Run Now button.
 
 ## Signal Flow Architecture
 
