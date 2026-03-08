@@ -7,21 +7,25 @@
 strategy("Scalping [AI-Agents]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.1)
 
 // ── Inputs ──────────────────────────────────────────────────────────
-emaLen         = input.int(9,    "EMA Length",                  minval=1)
-atrLen         = input.int(14,   "ATR Length",                  minval=1)
-atrSlMult      = input.float(0.5, "ATR Stop Loss Multiple",    minval=0.1, step=0.1)
-atrTpMult      = input.float(1.0, "ATR Take Profit Multiple",  minval=0.1, step=0.1)
-volSpikeThresh = input.float(2.0, "Volume Spike Threshold (x MA)", minval=1.0, step=0.5)
-volMALen       = input.int(20,   "Volume MA Length",            minval=5)
+emaLen         = input.int(10,   "EMA Length",                  minval=1)
+atrLen         = input.int(22,   "ATR Length",                  minval=1)
+atrSlMult      = input.float(0.65, "ATR Stop Loss Multiple",   minval=0.1, step=0.1)
+atrTpMult      = input.float(3.0, "ATR Take Profit Multiple",  minval=0.1, step=0.1)
+volSpikeThresh = input.float(2.75, "Volume Spike Threshold (x MA)", minval=1.0, step=0.25)
+volMALen       = input.int(35,   "Volume MA Length",            minval=5)
 useTimeFilter  = input.bool(true, "Enable Time Filter",        tooltip="Avoid low-volume periods")
 sessionStart   = input.int(8,    "Session Start Hour (UTC)",   minval=0, maxval=23)
-sessionEnd     = input.int(22,   "Session End Hour (UTC)",     minval=0, maxval=23)
+sessionEnd     = input.int(19,   "Session End Hour (UTC)",     minval=0, maxval=23)
+rsiLen         = input.int(10,   "RSI Length",                  minval=2, tooltip="RSI confirmation filter")
+rsiMin         = input.float(50, "RSI Minimum for Entry",      minval=20, maxval=80, step=5)
+cooldownBars   = input.int(6,    "Cooldown Bars After Exit",    minval=0, tooltip="Minimum bars between trades")
 webhookSecret  = input.string("", "Webhook Secret",            tooltip="Shared secret for webhook authentication")
 
 // ── Calculations ────────────────────────────────────────────────────
 ema    = ta.ema(close, emaLen)
 atr    = ta.atr(atrLen)
 volMA  = ta.sma(volume, volMALen)
+rsi    = ta.rsi(close, rsiLen)
 
 // VWAP (built-in)
 vwapVal = ta.vwap(hlc3)
@@ -39,9 +43,20 @@ belowVwap = close < vwapVal
 emaBullish = close > ema
 emaBearish = close < ema
 
+// RSI confirmation
+rsiBullish = rsi > rsiMin
+
+// Cooldown tracking
+var int barsSinceExit = 999
+if strategy.position_size <= 0 and strategy.position_size[1] > 0
+    barsSinceExit := 0
+else if strategy.position_size <= 0
+    barsSinceExit := barsSinceExit + 1
+
+cooldownOk = barsSinceExit >= cooldownBars
+
 // ── Conditions ──────────────────────────────────────────────────────
-// Long scalp: price above VWAP + above EMA + volume spike + in session
-longScalp  = aboveVwap and emaBullish and volumeSpike and inSession
+longScalp  = aboveVwap and emaBullish and volumeSpike and inSession and rsiBullish and cooldownOk
 
 // Exit: price drops below VWAP or EMA, or TP/SL hit
 longExit = belowVwap or emaBearish

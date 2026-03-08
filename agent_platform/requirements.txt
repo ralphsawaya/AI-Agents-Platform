@@ -11,3 +11,7 @@ psutil>=6.1.1
 apscheduler>=3.10.4
 pyyaml>=6.0.2
 python-dotenv>=1.0.1
+ccxt>=4.2.0
+scipy>=1.12.0
+numpy>=1.26.0
+pandas>=2.1.0

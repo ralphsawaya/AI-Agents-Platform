@@ -81,6 +81,7 @@ from agent_platform.api.routes.scheduler import router as scheduler_router  # no
 from agent_platform.api.routes.pages import router as pages_router  # noqa: E402
 from agent_platform.api.routes.webhook import router as webhook_router  # noqa: E402
 from agent_platform.api.routes.trading import router as trading_router  # noqa: E402
+from agent_platform.api.routes.backtest import router as backtest_router  # noqa: E402
 
 app.include_router(agents_router)
 app.include_router(execution_router)
@@ -90,6 +91,7 @@ app.include_router(scheduler_router)
 app.include_router(pages_router)
 app.include_router(webhook_router)
 app.include_router(trading_router)
+app.include_router(backtest_router)
 
 
 if __name__ == "__main__":

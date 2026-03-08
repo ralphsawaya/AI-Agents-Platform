@@ -1,0 +1,990 @@
+{% extends "base.html" %}
+{% block title %}Strategy Backtest — AI Agent Platform{% endblock %}
+
+{% block head %}
+<script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<style>
+/* ── Backtest two-panel layout ── */
+.bt-layout {
+    display: flex;
+    gap: 2rem;
+    align-items: flex-start;
+}
+
+/* ── Settings sidebar ── */
+.bt-sidebar {
+    width: 290px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    position: sticky;
+    top: 1rem;
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+}
+
+.bt-sidebar h2 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1.25rem;
+    letter-spacing: -0.01em;
+}
+
+.bt-sidebar h3 {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 1.25rem 0 0.6rem;
+}
+
+.bt-field { margin-bottom: 0.85rem; }
+
+.bt-field-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+}
+
+.bt-field label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-dim);
+    margin-bottom: 0.3rem;
+    display: block;
+    letter-spacing: 0.02em;
+}
+
+.bt-field input, .bt-field select {
+    width: 100%;
+    padding: 0.5rem 0.65rem;
+    font-size: 0.82rem;
+}
+
+/* ── Slider (blue selected, grey unselected) ── */
+.bt-slider-group {
+    margin-bottom: 1rem;
+    position: relative;
+}
+
+.bt-slider-group label {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 0.2rem;
+}
+
+.bt-slider-val {
+    display: block;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--primary);
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+}
+
+input[type="range"] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    border-radius: 2px;
+    outline: none;
+    border: none;
+    padding: 0;
+    background: linear-gradient(to right, #3b82f6 43%, #3f3f46 43%);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #3b82f6;
+    cursor: pointer;
+    border: 2px solid #fff;
+}
+
+input[type="range"]::-moz-range-progress {
+    background: #3b82f6;
+    height: 4px;
+    border-radius: 2px;
+}
+
+input[type="range"]::-moz-range-track {
+    background: #3f3f46;
+    height: 4px;
+    border-radius: 2px;
+}
+
+/* ── Code box (rules, costs) ── */
+.bt-code-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.85rem 1rem;
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    line-height: 1.65;
+    color: var(--text-secondary);
+}
+
+.bt-rules-ta {
+    width: 100%;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    resize: vertical;
+    outline: none;
+    padding: 0;
+}
+
+.bt-cost-row {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-bottom: 0.2rem;
+}
+
+.bt-cost-row:last-child { margin-bottom: 0; }
+
+.bt-inline-input {
+    width: 48px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border-hover);
+    color: var(--text);
+    font-family: inherit;
+    font-size: inherit;
+    padding: 0 2px;
+    text-align: right;
+    outline: none;
+}
+
+.bt-inline-input:focus { border-bottom-color: var(--primary); }
+
+/* ── Run / Stop buttons (blue) ── */
+.bt-run-btn {
+    width: 100%;
+    padding: 0.85rem;
+    background: var(--primary);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    margin-top: 1.25rem;
+    transition: background 0.15s;
+    box-shadow: 0 1px 2px rgba(59, 130, 246, 0.3);
+}
+
+.bt-run-btn:hover { background: var(--primary-hover); box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3); }
+
+.bt-stop-btn {
+    width: 100%;
+    padding: 0.85rem;
+    background: var(--surface-3);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-size: 0.88rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    margin-top: 0.5rem;
+}
+
+/* ── Main content ── */
+.bt-main {
+    flex: 1;
+    min-width: 0;
+}
+
+.bt-main h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+    letter-spacing: -0.02em;
+}
+
+.bt-main h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+}
+
+.bt-desc-list {
+    list-style: disc;
+    padding-left: 1.5rem;
+    margin: 0.5rem 0 1.25rem;
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+.bt-desc-list code {
+    background: var(--surface-3);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    font-size: 0.82em;
+}
+
+.bt-shows-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 1.5rem;
+    counter-reset: shows;
+}
+
+.bt-shows-list li {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.35rem;
+    padding-left: 0.25rem;
+}
+
+.bt-shows-list li strong { color: var(--text); }
+
+/* ── Section numbers ── */
+.bt-num {
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+}
+
+.bt-num-1 { background: #22c55e; color: #000; }
+.bt-num-2 { background: #f59e0b; color: #000; }
+.bt-num-3 { background: #8b5cf6; color: #fff; }
+.bt-num-4 { background: #3b82f6; color: #fff; }
+
+/* ── Sections ── */
+.bt-section { margin-bottom: 3rem; }
+
+.bt-section > p {
+    font-size: 0.84rem;
+    color: var(--text-dim);
+    margin-bottom: 1.25rem;
+    line-height: 1.6;
+}
+
+/* ── Progress ── */
+.bt-progress-wrap { margin: 1.5rem 0 1rem; }
+
+.bt-progress-text {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.bt-progress-bar {
+    width: 100%;
+    height: 6px;
+    background: var(--surface-3);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.bt-progress-fill {
+    height: 100%;
+    background: #3b82f6;
+    border-radius: 3px;
+    width: 0%;
+    transition: width 0.3s ease;
+}
+
+.bt-fold-log {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    margin-top: 1rem;
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    line-height: 1.8;
+}
+
+.bt-fold-entry { white-space: nowrap; }
+
+/* ── Comparison cards ── */
+.bt-comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.bt-comp-col { min-width: 0; }
+
+.bt-comp-header {
+    padding: 1rem 1.25rem;
+    border-radius: 10px;
+    text-align: center;
+    color: #fff;
+}
+
+.bt-comp-header .bt-ch-title { font-size: 1.05rem; font-weight: 700; }
+.bt-comp-header .bt-ch-sub { font-size: 0.72rem; opacity: 0.8; margin-top: 0.15rem; }
+
+.bt-comp-header.is-header { background: linear-gradient(135deg, #4338ca, #6366f1); }
+.bt-comp-header.oos-header { background: linear-gradient(135deg, #b91c1c, #ea580c); }
+
+.bt-metric-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.65rem;
+    margin-top: 0.75rem;
+}
+
+.bt-metric-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    text-align: center;
+}
+
+.bt-metric-label {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+}
+
+.bt-metric-value {
+    font-size: 1.35rem;
+    font-weight: 700;
+    margin-top: 0.25rem;
+    letter-spacing: -0.01em;
+}
+
+/* ── Degradation ── */
+.bt-degradation {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.bt-deg-card { text-align: center; }
+.bt-deg-label { font-size: 0.88rem; color: var(--text-dim); margin-bottom: 0.25rem; }
+.bt-deg-value { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; }
+.bt-deg-sub { font-size: 0.78rem; margin-top: 0.2rem; }
+
+/* ── Param summary callout ── */
+.bt-callout {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.25);
+    border-radius: var(--radius);
+    padding: 0.75rem 1rem;
+    margin-top: 1rem;
+    font-size: 0.84rem;
+    color: #fcd34d;
+}
+
+/* ── Timeframe badge ── */
+.bt-tf-badge {
+    display: inline-block;
+    background: rgba(59, 130, 246, 0.15);
+    color: #60a5fa;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.2em 0.55em;
+    border-radius: 4px;
+    letter-spacing: 0.04em;
+    margin-left: 0.4rem;
+    vertical-align: middle;
+}
+
+/* ── Placeholder ── */
+.bt-placeholder {
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    font-style: italic;
+    margin-top: 1rem;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bt-layout">
+
+    <!-- ═══ Settings Sidebar ═══ -->
+    <aside class="bt-sidebar">
+        <h2>Settings</h2>
+
+        <div class="bt-field">
+            <label>Strategy <span class="bt-tf-badge" id="bt-tf-badge">15m</span></label>
+            <select id="bt-strategy" onchange="updateStrategy()">
+                <option value="scalping">Scalping (EMA + VWAP + Volume)</option>
+                <option value="trend_following">Trend Following (EMA Cross + ADX)</option>
+                <option value="mean_reversion">Mean Reversion (BB + RSI)</option>
+            </select>
+        </div>
+
+        <div class="bt-field">
+            <label>Trading Pair</label>
+            <select id="bt-ticker">
+                <option value="BTCUSDT">BTC / USDT</option>
+                <option value="ETHUSDT">ETH / USDT</option>
+                <option value="SOLUSDT">SOL / USDT</option>
+                <option value="BNBUSDT">BNB / USDT</option>
+                <option value="XRPUSDT">XRP / USDT</option>
+            </select>
+        </div>
+
+        <div class="bt-field-row">
+            <div class="bt-field">
+                <label>Start</label>
+                <input type="date" id="bt-start" value="2021-01-01">
+            </div>
+            <div class="bt-field">
+                <label>End</label>
+                <input type="date" id="bt-end" value="2026-01-01">
+            </div>
+        </div>
+
+        <h3>Walk-Forward Windows</h3>
+
+        <div class="bt-slider-group">
+            <label>Training window (days)</label>
+            <span class="bt-slider-val" id="train-val">14</span>
+            <input type="range" id="bt-train" min="7" max="365" value="14"
+                   oninput="document.getElementById('train-val').textContent=this.value;updateSlider(this)">
+        </div>
+
+        <div class="bt-slider-group">
+            <label>Blind test window (days)</label>
+            <span class="bt-slider-val" id="test-val">3</span>
+            <input type="range" id="bt-test" min="1" max="90" value="3"
+                   oninput="document.getElementById('test-val').textContent=this.value;updateSlider(this)">
+        </div>
+
+        <h3>Strategy Rules</h3>
+        <div class="bt-code-box">
+            <textarea id="bt-rules" class="bt-rules-ta" rows="6">LONG  : price > VWAP AND price > EMA
+        AND volume > volMA &times; threshold
+        AND RSI > 50
+EXIT  : price &lt; VWAP OR price &lt; EMA
+SL/TP : ATR-based dynamic levels</textarea>
+        </div>
+
+        <h3>Transaction Costs</h3>
+        <div class="bt-code-box">
+            <div class="bt-cost-row">
+                <span>Exchange fee :</span>
+                <input type="number" class="bt-inline-input" id="bt-fee" value="0.10" step="0.01" min="0" oninput="updateCosts()">
+                <span>% per trade</span>
+            </div>
+            <div class="bt-cost-row">
+                <span>Slippage&nbsp;&nbsp;&nbsp;&nbsp;:</span>
+                <input type="number" class="bt-inline-input" id="bt-slip" value="0.05" step="0.01" min="0" oninput="updateCosts()">
+                <span>% per trade</span>
+            </div>
+            <div class="bt-cost-row">
+                <span>Total cost&nbsp;&nbsp;: <strong id="bt-total-cost">0.15</strong> % per trade</span>
+            </div>
+        </div>
+
+        <button class="bt-run-btn" id="bt-run-btn" onclick="runAnalysis()">Run Walk-Forward Analysis</button>
+        <button class="bt-stop-btn" id="bt-stop-btn" onclick="stopAnalysis()" style="display:none">Stop</button>
+    </aside>
+
+    <!-- ═══ Main Content ═══ -->
+    <div class="bt-main">
+
+        <div id="bt-header">
+            <h1 id="bt-title">Strategy: Scalping (EMA + VWAP + Volume) &mdash; 15m</h1>
+            <ul class="bt-desc-list" id="bt-desc">
+                <li><strong>EMA Filter:</strong> Price must be above short-term EMA (optimised length)</li>
+                <li><strong>VWAP Filter:</strong> Price must be above rolling Volume Weighted Average Price</li>
+                <li><strong>Volume Spike:</strong> Entry only on volume surges above moving average threshold</li>
+                <li><strong>Risk Management:</strong> ATR-based stop loss and take profit levels</li>
+            </ul>
+
+            <h2>This Dashboard Shows:</h2>
+            <ol class="bt-shows-list">
+                <li>1. <strong>Fold Visualiser</strong> &mdash; See each train/test fold laid out chronologically</li>
+                <li>2. <strong>Parameter Shift Table</strong> &mdash; Watch how &ldquo;optimal&rdquo; parameters change every fold</li>
+                <li>3. <strong>Illusion vs. Reality</strong> &mdash; Side-by-side metrics and equity curves: in-sample vs. out-of-sample</li>
+            </ol>
+        </div>
+
+        <div id="bt-progress" style="display:none">
+            <h1>Walk-Forward Analysis Engine</h1>
+            <p style="color:var(--text-dim);font-size:0.88rem;margin-bottom:0.5rem">
+                Exposing curve-fitting: traditional backtesting vs. blind out-of-sample testing
+            </p>
+            <div class="bt-progress-wrap">
+                <div class="bt-progress-text" id="bt-progress-text">Downloading data from Binance&hellip;</div>
+                <div class="bt-progress-bar"><div class="bt-progress-fill" id="bt-progress-fill"></div></div>
+            </div>
+            <div class="bt-fold-log" id="bt-fold-log"></div>
+        </div>
+
+        <div id="bt-results" style="display:none">
+            <div class="bt-section">
+                <h2><span class="bt-num bt-num-1">1</span> Walk-Forward Timeline</h2>
+                <p>Each fold: the optimiser trains on the <strong style="color:#6380ff">blue</strong> window, then the best parameters are tested blindly on the <strong style="color:#ea9542">orange</strong> window. Only orange (out-of-sample) returns are kept.</p>
+                <div id="timeline-chart"></div>
+            </div>
+
+            <div class="bt-section">
+                <h2><span class="bt-num bt-num-2">2</span> Parameter Shift Table</h2>
+                <p>The optimiser picks <em>different</em> parameters for every fold. This proves that a single fixed parameter set will inevitably fail as market regimes change.</p>
+                <div id="param-table-wrap"></div>
+                <div class="bt-callout" id="param-summary"></div>
+            </div>
+
+            <div class="bt-section">
+                <h2><span class="bt-num bt-num-3">3</span> Illusion vs. Reality</h2>
+                <p><strong>Left:</strong> what a retail trader sees after optimising on historical data (the illusion). <strong>Right:</strong> what actually happens when those parameters meet unseen data (the reality).</p>
+                <div id="metrics-grid"></div>
+                <div id="degradation-grid"></div>
+            </div>
+
+            <div class="bt-section">
+                <h2><span class="bt-num bt-num-4">4</span> Illusion vs. Reality Chart</h2>
+                <p>The blue line is what a retail trader would show investors. The orange line is what walk-forward analysis reveals. Shaded bands mark each blind out-of-sample test window.</p>
+                <div id="equity-chart"></div>
+            </div>
+        </div>
+
+        <div id="bt-placeholder" class="bt-placeholder">
+            <p>Configure parameters in the sidebar and click <strong>Run Walk-Forward Analysis</strong> to begin.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let abortCtrl = null;
+
+/* ── Slider gradient helper ──────────────────────────────── */
+
+function updateSlider(el) {
+    const pct = (el.value - el.min) / (el.max - el.min) * 100;
+    el.style.background = 'linear-gradient(to right, #3b82f6 0%, #3b82f6 ' + pct + '%, #3f3f46 ' + pct + '%, #3f3f46 100%)';
+}
+
+/* ── Strategy / cost helpers ─────────────────────────────── */
+
+var _TF_MAP = {scalping: '15m', trend_following: '4h', mean_reversion: '4h'};
+var _DEFAULTS = {
+    scalping:        {train: 14,  test: 3},
+    trend_following: {train: 90,  test: 21},
+    mean_reversion:  {train: 60,  test: 14},
+};
+
+function setSlider(id, val) {
+    var el = document.getElementById(id);
+    el.value = val;
+    document.getElementById(id === 'bt-train' ? 'train-val' : 'test-val').textContent = val;
+    updateSlider(el);
+}
+
+function updateStrategy() {
+    const s = document.getElementById('bt-strategy').value;
+    const title = document.getElementById('bt-title');
+    const desc = document.getElementById('bt-desc');
+    const rules = document.getElementById('bt-rules');
+    const tf = _TF_MAP[s] || '1d';
+    const defs = _DEFAULTS[s] || {train: 90, test: 14};
+
+    document.getElementById('bt-tf-badge').textContent = tf;
+    setSlider('bt-train', defs.train);
+    setSlider('bt-test', defs.test);
+
+    if (s === 'scalping') {
+        title.textContent = 'Strategy: Scalping (EMA + VWAP + Volume) \u2014 ' + tf;
+        desc.innerHTML =
+            '<li><strong>EMA Filter:</strong> Price must be above short-term EMA (optimised length)</li>' +
+            '<li><strong>VWAP Filter:</strong> Price must be above rolling Volume Weighted Average Price</li>' +
+            '<li><strong>Volume Spike:</strong> Entry only on volume surges above moving average threshold</li>' +
+            '<li><strong>Risk Management:</strong> ATR-based stop loss and take profit levels</li>';
+        rules.value = 'LONG  : price > VWAP AND price > EMA\n        AND volume > volMA \u00d7 threshold\n        AND RSI > 50\nEXIT  : price < VWAP OR price < EMA\nSL/TP : ATR-based dynamic levels';
+    } else if (s === 'trend_following') {
+        title.textContent = 'Strategy: Trend Following (EMA Cross + ADX) \u2014 ' + tf;
+        desc.innerHTML =
+            '<li><strong>Dual EMA Crossover:</strong> Fast EMA crosses above Mid EMA for entry signal</li>' +
+            '<li><strong>ADX Filter:</strong> Only enter when trend strength exceeds threshold</li>' +
+            '<li><strong>MACD Confirmation:</strong> MACD histogram must be bullish</li>' +
+            '<li><strong>Trailing Stop:</strong> ATR-based trailing stop for dynamic exit</li>';
+        rules.value = 'LONG  : EMA(fast) crosses above EMA(mid)\n        AND ADX > threshold\n        AND MACD histogram > 0\nEXIT  : bearish cross OR trailing stop hit\nTRAIL : high \u2212 ATR \u00d7 multiplier';
+    } else {
+        title.textContent = 'Strategy: Mean Reversion (BB + RSI) \u2014 ' + tf;
+        desc.innerHTML =
+            '<li><strong>Bollinger Bands:</strong> Buy at lower band, take profit at middle band</li>' +
+            '<li><strong>RSI Filter:</strong> Entry only when RSI signals oversold conditions</li>' +
+            '<li><strong>Volume Confirmation:</strong> High volume confirms reversal potential</li>' +
+            '<li><strong>Stop Loss:</strong> ATR-based stop loss below entry</li>';
+        rules.value = 'LONG  : price \u2264 lower BB\n        AND RSI < oversold level\n        AND volume > volMA \u00d7 1.5\nEXIT  : price \u2265 upper BB AND RSI > overbought\nTP    : price reaches middle BB (mean)\nSL    : entry \u2212 ATR \u00d7 1.5';
+    }
+}
+
+function updateCosts() {
+    const fee = parseFloat(document.getElementById('bt-fee').value) || 0;
+    const slip = parseFloat(document.getElementById('bt-slip').value) || 0;
+    document.getElementById('bt-total-cost').textContent = (fee + slip).toFixed(2);
+}
+
+function getConfig() {
+    return {
+        ticker:       document.getElementById('bt-ticker').value,
+        start:        document.getElementById('bt-start').value,
+        end:          document.getElementById('bt-end').value,
+        train_days:   parseInt(document.getElementById('bt-train').value),
+        test_days:    parseInt(document.getElementById('bt-test').value),
+        strategy:     document.getElementById('bt-strategy').value,
+        exchange_fee: parseFloat(document.getElementById('bt-fee').value) || 0.1,
+        slippage:     parseFloat(document.getElementById('bt-slip').value) || 0.05,
+    };
+}
+
+/* ── Run / Stop ──────────────────────────────────────────── */
+
+async function runAnalysis() {
+    const cfg = getConfig();
+
+    document.getElementById('bt-placeholder').style.display = 'none';
+    document.getElementById('bt-results').style.display = 'none';
+    document.getElementById('bt-header').style.display = 'none';
+    document.getElementById('bt-progress').style.display = 'block';
+    document.getElementById('bt-run-btn').style.display = 'none';
+    document.getElementById('bt-stop-btn').style.display = 'block';
+    document.getElementById('bt-fold-log').innerHTML = '';
+    document.getElementById('bt-progress-fill').style.width = '0%';
+    var tf = _TF_MAP[cfg.strategy] || '1d';
+    document.getElementById('bt-progress-text').textContent = 'Loading ' + tf + ' data (cached or Binance)\u2026';
+
+    abortCtrl = new AbortController();
+
+    try {
+        const res = await fetch('/api/backtest/run', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(cfg),
+            signal: abortCtrl.signal,
+        });
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+
+        while (true) {
+            const {done, value} = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, {stream: true});
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    handleEvent(JSON.parse(line.substring(6)));
+                }
+            }
+        }
+    } catch (e) {
+        if (e.name === 'AbortError') {
+            toast('Analysis stopped', 'info');
+        } else {
+            toast('Error: ' + e.message, 'error');
+        }
+    }
+
+    document.getElementById('bt-run-btn').style.display = 'block';
+    document.getElementById('bt-stop-btn').style.display = 'none';
+}
+
+function stopAnalysis() {
+    if (abortCtrl) abortCtrl.abort();
+}
+
+/* ── Event dispatcher ────────────────────────────────────── */
+
+function handleEvent(evt) {
+    if (evt.type === 'info') {
+        var tfLabel = evt.timeframe ? ' (' + evt.timeframe + ' candles)' : '';
+        document.getElementById('bt-progress-text').textContent =
+            evt.data_points.toLocaleString() + ' candles loaded' + tfLabel + ' \u2014 Processing fold 0 of ' + evt.total_folds + '\u2026';
+    } else if (evt.type === 'fold') {
+        onFold(evt);
+    } else if (evt.type === 'complete') {
+        onComplete(evt);
+    } else if (evt.type === 'error') {
+        toast(evt.message, 'error');
+        document.getElementById('bt-progress').style.display = 'none';
+        document.getElementById('bt-header').style.display = 'block';
+        document.getElementById('bt-placeholder').style.display = 'block';
+    }
+}
+
+/* ── Fold progress ───────────────────────────────────────── */
+
+function onFold(f) {
+    const pct = (f.fold_num / f.total_folds * 100).toFixed(0);
+    document.getElementById('bt-progress-text').textContent =
+        'Processing fold ' + f.fold_num + ' of ' + f.total_folds + '\u2026';
+    document.getElementById('bt-progress-fill').style.width = pct + '%';
+
+    const strat = document.getElementById('bt-strategy').value;
+    let paramStr;
+    if (strat === 'scalping') {
+        paramStr = 'EMA(' + f.params.ema_len + '), Vol(' + f.params.vol_thresh + '), SL(' + f.params.atr_sl + '), TP(' + f.params.atr_tp + ')';
+    } else if (strat === 'trend_following') {
+        paramStr = 'Fast(' + f.params.ema_fast + '), Mid(' + f.params.ema_mid + '), ADX(' + f.params.adx_thresh + '), Trail(' + f.params.atr_trail + ')';
+    } else {
+        paramStr = 'BB(' + f.params.bb_len + ',' + f.params.bb_std + '), RSI(' + f.params.rsi_os + '/' + f.params.rsi_ob + ')';
+    }
+
+    const retClr = f.oos_return >= 0 ? '#22c55e' : '#ef4444';
+    const sign = f.oos_return > 0 ? '+' : '';
+    const el = document.createElement('div');
+    el.className = 'bt-fold-entry';
+    el.innerHTML =
+        '<span>Fold ' + f.fold_num + '/' + f.total_folds +
+        ' \u2014 Train: ' + f.train_start + ' \u2192 ' + f.train_end + '</span>' +
+        '<span style="color:var(--primary)"> | Blind Test: ' + f.test_start + ' \u2192 ' + f.test_end + '</span>' +
+        '<span> | Optimal ' + paramStr + '</span>' +
+        '<span> | OOS Return: <span style="color:' + retClr + '">' + sign + f.oos_return + '%</span></span>';
+
+    const log = document.getElementById('bt-fold-log');
+    log.appendChild(el);
+    log.scrollTop = log.scrollHeight;
+}
+
+/* ── Complete: render all results ─────────────────────────── */
+
+function onComplete(data) {
+    document.getElementById('bt-progress').style.display = 'none';
+    document.getElementById('bt-header').style.display = 'block';
+    document.getElementById('bt-results').style.display = 'block';
+
+    renderTimeline(data);
+    renderParamTable(data);
+    renderMetrics(data);
+    renderEquity(data);
+}
+
+/* ── 1. Walk-Forward Timeline ─────────────────────────────── */
+
+function renderTimeline(data) {
+    const folds = data.folds;
+    const startDate = new Date(data.is_equity.dates[0]);
+    const trainY = [], trainX = [], trainBase = [];
+    const testY = [], testX = [], testBase = [];
+
+    folds.forEach(function(f, i) {
+        const label = 'Fold ' + (i + 1);
+        const ts = (new Date(f.train_start) - startDate) / 86400000;
+        const te = (new Date(f.train_end)   - startDate) / 86400000;
+        const bs = (new Date(f.test_start)  - startDate) / 86400000;
+        const be = (new Date(f.test_end)    - startDate) / 86400000;
+
+        trainY.push(label); trainBase.push(ts); trainX.push(te - ts);
+        testY.push(label);  testBase.push(bs);  testX.push(be - bs);
+    });
+
+    const trainDays = document.getElementById('bt-train').value;
+    const testDays = document.getElementById('bt-test').value;
+
+    Plotly.newPlot('timeline-chart', [
+        {type:'bar', orientation:'h', y:trainY, x:trainX, base:trainBase,
+         marker:{color:'rgba(99,132,255,0.75)'}, name:'Train (' + trainDays + 'd)',
+         hovertemplate:'%{y}<extra></extra>'},
+        {type:'bar', orientation:'h', y:testY, x:testX, base:testBase,
+         marker:{color:'rgba(234,149,66,0.85)'}, name:'Blind Test (' + testDays + 'd)',
+         hovertemplate:'%{y}<extra></extra>'},
+    ], {
+        barmode:'overlay',
+        paper_bgcolor:'transparent', plot_bgcolor:'rgba(19,19,22,0.5)',
+        font:{color:'#a1a1aa', family:'Inter, sans-serif', size:11},
+        xaxis:{title:'Days from start', gridcolor:'#27272a', zerolinecolor:'#27272a'},
+        yaxis:{autorange:'reversed', gridcolor:'#27272a'},
+        legend:{x:0.5, y:1.12, xanchor:'center', orientation:'h', font:{size:11}},
+        margin:{l:70, r:20, t:45, b:45},
+        height: Math.max(320, folds.length * 36 + 100),
+    }, {displayModeBar:false, responsive:true});
+}
+
+/* ── 2. Parameter Shift Table ─────────────────────────────── */
+
+function renderParamTable(data) {
+    const s = data.strategy;
+    const folds = data.folds;
+
+    let hdr;
+    if (s === 'scalping') {
+        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
+              '<th>EMA Len</th><th>Vol Thresh</th><th>ATR SL</th><th>ATR TP</th>' +
+              '<th>Train Sharpe</th><th>OOS Return</th>';
+    } else if (s === 'trend_following') {
+        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
+              '<th>EMA Fast</th><th>EMA Mid</th><th>ADX Thresh</th><th>ATR Trail</th>' +
+              '<th>Train Sharpe</th><th>OOS Return</th>';
+    } else {
+        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
+              '<th>BB Len</th><th>BB Std</th><th>RSI OS</th><th>RSI OB</th>' +
+              '<th>Train Sharpe</th><th>OOS Return</th>';
+    }
+
+    const rows = folds.map(function(f, i) {
+        const rc = f.oos_return >= 0 ? 'color:#22c55e' : 'color:#ef4444';
+        const sign = f.oos_return > 0 ? '+' : '';
+        let pc;
+        if (s === 'scalping') {
+            pc = '<td>' + f.params.ema_len + '</td><td>' + f.params.vol_thresh +
+                 '</td><td>' + f.params.atr_sl + '</td><td>' + f.params.atr_tp + '</td>';
+        } else if (s === 'trend_following') {
+            pc = '<td>' + f.params.ema_fast + '</td><td>' + f.params.ema_mid +
+                 '</td><td>' + f.params.adx_thresh + '</td><td>' + f.params.atr_trail + '</td>';
+        } else {
+            pc = '<td>' + f.params.bb_len + '</td><td>' + f.params.bb_std +
+                 '</td><td>' + f.params.rsi_os + '</td><td>' + f.params.rsi_ob + '</td>';
+        }
+        return '<tr><td>Fold ' + (i+1) + '</td>' +
+               '<td>' + f.train_start + ' to ' + f.train_end + '</td>' +
+               '<td>' + f.test_start + ' to ' + f.test_end + '</td>' +
+               pc +
+               '<td>' + f.train_sharpe + '</td>' +
+               '<td style="' + rc + '">' + sign + f.oos_return + '%</td></tr>';
+    }).join('');
+
+    document.getElementById('param-table-wrap').innerHTML =
+        '<table><thead><tr>' + hdr + '</tr></thead><tbody>' + rows + '</tbody></table>';
+
+    document.getElementById('param-summary').innerHTML =
+        'The optimiser chose <strong>' + data.unique_params +
+        '</strong> different parameter sets across <strong>' + folds.length +
+        '</strong> folds. Market regimes shift, so no single fixed parameter set works.';
+}
+
+/* ── 3. Illusion vs. Reality ──────────────────────────────── */
+
+function renderMetrics(data) {
+    const ism = data.is_metrics;
+    const osm = data.oos_metrics;
+    const deg = data.degradation;
+
+    function mc(label, val, suf, colorize) {
+        let clr = '#fafafa';
+        if (colorize && typeof val === 'number') {
+            clr = val >= 0 ? '#22c55e' : '#ef4444';
+        }
+        const sign = (typeof val === 'number' && val > 0) ? '+' : '';
+        return '<div class="bt-metric-card">' +
+            '<div class="bt-metric-label">' + label + '</div>' +
+            '<div class="bt-metric-value" style="color:' + clr + '">' + sign + val + suf + '</div></div>';
+    }
+
+    document.getElementById('metrics-grid').innerHTML =
+        '<div class="bt-comparison">' +
+            '<div class="bt-comp-col">' +
+                '<div class="bt-comp-header is-header">' +
+                    '<div class="bt-ch-title">Retail Backtest</div>' +
+                    '<div class="bt-ch-sub">In-Sample (Curve-Fit)</div>' +
+                '</div>' +
+                '<div class="bt-metric-grid">' +
+                    mc('TOTAL RETURN', ism.total_return, '%', true) +
+                    mc('SHARPE RATIO', ism.sharpe, '', false) +
+                    mc('MAX DRAWDOWN', ism.max_drawdown, '%', true) +
+                    mc('TRADES', ism.trades, '', false) +
+                '</div>' +
+            '</div>' +
+            '<div class="bt-comp-col">' +
+                '<div class="bt-comp-header oos-header">' +
+                    '<div class="bt-ch-title">Walk-Forward</div>' +
+                    '<div class="bt-ch-sub">Out-of-Sample (Blind)</div>' +
+                '</div>' +
+                '<div class="bt-metric-grid">' +
+                    mc('TOTAL RETURN', osm.total_return, '%', true) +
+                    mc('SHARPE RATIO', osm.sharpe, '', false) +
+                    mc('MAX DRAWDOWN', osm.max_drawdown, '%', true) +
+                    mc('TRADES', osm.trades, '', false) +
+                '</div>' +
+            '</div>' +
+        '</div>';
+
+    const retDeg = deg['return'];
+    const shDeg  = deg.sharpe;
+    const eff    = deg.efficiency;
+
+    document.getElementById('degradation-grid').innerHTML =
+        '<div class="bt-degradation">' +
+            '<div class="bt-deg-card">' +
+                '<div class="bt-deg-label">Return Degradation</div>' +
+                '<div class="bt-deg-value">+' + Math.abs(retDeg) + '%</div>' +
+                '<div class="bt-deg-sub" style="color:#ef4444">\u2193 -' + Math.abs(retDeg) + '%</div>' +
+            '</div>' +
+            '<div class="bt-deg-card">' +
+                '<div class="bt-deg-label">Sharpe Degradation</div>' +
+                '<div class="bt-deg-value">+' + Math.abs(shDeg) + '</div>' +
+                '<div class="bt-deg-sub" style="color:#ef4444">\u2193 -' + Math.abs(shDeg) + '</div>' +
+            '</div>' +
+            '<div class="bt-deg-card">' +
+                '<div class="bt-deg-label">OOS / IS Efficiency \u24D8</div>' +
+                '<div class="bt-deg-value" style="color:var(--text)">' + eff + '%</div>' +
+            '</div>' +
+        '</div>';
+}
+
+/* ── 4. Equity Curve Chart ────────────────────────────────── */
+
+function renderEquity(data) {
+    const shapes = data.folds.map(function(f) {
+        return {
+            type:'rect', xref:'x', yref:'paper',
+            x0:f.test_start, x1:f.test_end, y0:0, y1:1,
+            fillcolor:'rgba(234,149,66,0.08)', line:{width:0},
+        };
+    });
+
+    Plotly.newPlot('equity-chart', [
+        {x:data.is_equity.dates, y:data.is_equity.values, mode:'lines',
+         name:'Retail Backtest (In-Sample)', line:{color:'#6366f1', width:1.5}},
+        {x:data.oos_equity.dates, y:data.oos_equity.values, mode:'lines',
+         name:'Walk-Forward (Out-of-Sample)', line:{color:'#ea9542', width:2}},
+    ], {
+        paper_bgcolor:'transparent', plot_bgcolor:'rgba(19,19,22,0.5)',
+        font:{color:'#a1a1aa', family:'Inter, sans-serif'},
+        xaxis:{title:'Date', gridcolor:'#27272a', type:'date'},
+        yaxis:{title:'Growth of $1', gridcolor:'#27272a'},
+        legend:{x:0.5, y:1.12, xanchor:'center', orientation:'h', font:{size:11}},
+        margin:{l:60, r:20, t:40, b:50},
+        shapes: shapes,
+        height: 420,
+    }, {displayModeBar:false, responsive:true});
+}
+
+/* ── Init: set slider gradients on page load ──────────────── */
+
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('input[type="range"]').forEach(updateSlider);
+});
+</script>
+{% endblock %}

@@ -1,9 +1,11 @@
-from pymongo.errors import OperationFailure
+from pymongo.errors import CollectionInvalid, OperationFailure
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
 from agent_platform.config import settings
+
+_OHLCV_TTL_SECONDS = 4 * 365 * 24 * 60 * 60
 
 
 async def _safe_create_indexes(collection, indexes: list[IndexModel]) -> None:
@@ -98,3 +100,17 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await _safe_create_indexes(risk_state, [
         IndexModel([("updated_at", DESCENDING)]),
     ])
+
+    # --- OHLCV timeseries cache (4-year TTL) ---
+    try:
+        await db.create_collection(
+            "ohlcv",
+            timeseries={
+                "timeField": "timestamp",
+                "metaField": "meta",
+                "granularity": "minutes",
+            },
+            expireAfterSeconds=_OHLCV_TTL_SECONDS,
+        )
+    except CollectionInvalid:
+        pass

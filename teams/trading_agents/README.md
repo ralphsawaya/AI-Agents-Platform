@@ -196,6 +196,8 @@ Settings can be configured in two ways:
 1. **Trading tab Settings panel** (recommended) — expand the Settings section at the bottom of the Trading tab to select the LLM provider/model, enter API keys, and adjust risk and indicator parameters. Click **Save Settings** to persist everything to MongoDB. These settings survive server restarts.
 2. **Environment variables** — set in `.env` as fallback defaults. MongoDB settings take precedence when present.
 
+> **Important:** The **Indicator Periods** in the Settings panel (ADX Period, ATR Period, BB Period, EMA Fast/Mid/Slow, RSI Period, Volume MA Period) are used **only by Pipeline 1's Analyst** for computing the 19 technical indicators that feed into LLM-based regime classification. They have **no effect** on the Pine Script strategies running on TradingView. Each Pine Script strategy has its own independent parameters — see [Pine Script Strategies](#pine-script-strategies) below for details.
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `LLM_PROVIDER` | LLM provider (`gemini`, `claude`, or `deepseek`) | `gemini` |
@@ -253,12 +255,172 @@ When TradingView fires a webhook to `POST /api/webhook/tradingview`, the platfor
 
 ## Pine Script Strategies
 
-Three TradingView strategies in `strategies/` send webhook alerts to this system:
+Three TradingView strategies in `strategies/` send webhook alerts to this system. Each strategy has its **own parameters defined as TradingView inputs** inside the `.pine` file — these are completely independent from the Indicator Periods in the Settings panel (which only affect the Analyst's regime classification). To change a strategy's trading behavior, edit the `.pine` file directly or override the inputs in TradingView's strategy settings.
 
 | Strategy | Regime | Timeframe | Entry Logic |
 |----------|--------|-----------|-------------|
 | `trend_following` | Trending | 4H | EMA(9/21) crossover + ADX > 25 + MACD confirmation |
 | `mean_reversion` | Ranging | 4H | Bollinger Band bounce + RSI oversold/overbought + volume |
-| `scalping` | High volatility | 1H | VWAP + EMA(9) + volume spike, tight SL/TP |
+| `scalping` | High volatility | 1H | VWAP + EMA(9) + volume spike, wide TP (3× ATR) |
+
+### Strategy Parameters
+
+#### `trend_following.pine`
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| EMA Fast Length | 9 | Fast EMA for crossover signal |
+| EMA Mid Length | 21 | Mid EMA for crossover signal |
+| ADX Length | 14 | ADX period for trend strength |
+| ADX Threshold | 25.0 | Minimum ADX to confirm a strong trend |
+| ATR Length | 14 | ATR period for trailing stop |
+| ATR Trailing Stop Multiplier | 2.0 | Trailing stop distance as multiple of ATR |
+
+#### `mean_reversion.pine`
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| Bollinger Band Length | 20 | BB lookback period |
+| Bollinger Band Std Dev | 2.0 | BB width in standard deviations |
+| RSI Length | 14 | RSI lookback period |
+| RSI Oversold Level | 30.0 | RSI threshold for buy signal |
+| RSI Overbought Level | 70.0 | RSI threshold for sell signal |
+| Volume Confirmation Multiple | 1.5 | Volume must exceed this × volume MA |
+| ATR Length | 14 | ATR period for stop-loss |
+| ATR Stop Loss Multiple | 1.5 | Stop-loss distance as multiple of ATR |
+
+#### `scalping.pine`
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| EMA Length | 10 | EMA period for trend filter |
+| ATR Length | 22 | ATR period for SL/TP calculation |
+| ATR Stop Loss Multiple | 0.65 | Stop-loss distance as multiple of ATR |
+| ATR Take Profit Multiple | 3.0 | Take-profit distance as multiple of ATR |
+| Volume Spike Threshold | 2.75× | Volume must exceed this × volume MA |
+| Volume MA Length | 35 | Lookback for volume moving average |
+| Session Start Hour (UTC) | 8 | Start of active trading window |
+| Session End Hour (UTC) | 19 | End of active trading window |
+| RSI Length | 10 | RSI period for momentum confirmation |
+| RSI Minimum for Entry | 50 | Only enter when RSI is above this level |
+| Cooldown Bars After Exit | 6 | Minimum bars to wait between trades |
 
 Each strategy sends a JSON webhook payload containing `strategy_name`, `action`, `ticker`, `price`, and a shared `secret` for authentication.
+
+## Strategy Backtest — Walk-Forward Analysis Engine
+
+The platform includes a walk-forward backtesting engine (`agent_platform/api/routes/backtest.py`) that translates the three Pine Script strategies above into Python and runs them against historical Binance data. The purpose is to expose curve-fitting: comparing what a retail backtest shows (in-sample, optimised on all data) vs. what actually happens on unseen data (out-of-sample, blind-tested).
+
+### How Walk-Forward Analysis Works
+
+Traditional backtesting optimises a strategy over the entire historical dataset and reports the result — this is the "illusion." Walk-forward analysis splits the data into rolling windows and reveals the "reality":
+
+```
+ ┌─── Train (optimise) ───┐┌─ Blind Test ─┐
+ │  Find best params here  ││ Apply blindly │
+ └─────────────────────────┘└──────────────┘
+          ─────── slide forward ───────►
+ ┌─── Train (optimise) ───┐┌─ Blind Test ─┐
+ └─────────────────────────┘└──────────────┘
+          ─────── slide forward ───────►
+ ┌─── Train (optimise) ───┐┌─ Blind Test ─┐
+ └─────────────────────────┘└──────────────┘
+```
+
+1. **Train window** — the optimiser grid-searches all parameter combinations and picks the set with the highest Sharpe ratio.
+2. **Blind test window** — the winning parameters are applied to data the optimiser has never seen. Only these out-of-sample returns are kept.
+3. **Slide forward** — the window advances by the test length and repeats.
+4. **Stitch** — all blind-test returns are concatenated into a single equity curve. This is the realistic performance estimate.
+
+The engine then compares this stitched out-of-sample result against a conventional backtest (global optimisation on all data) to quantify the degradation.
+
+### Strategies (Python Translations)
+
+Each Pine Script strategy is translated to Python with the same core logic. The timeframe and optimised parameters differ per strategy:
+
+| Strategy | Timeframe | Indicators | Entry | Exit | Optimised Parameters |
+|----------|-----------|------------|-------|------|---------------------|
+| `scalping` | **15m** | EMA, VWAP, RSI, Volume MA, ATR | Price > VWAP, Price > EMA, volume spike, RSI > 50 | Price < VWAP or < EMA, or SL/TP hit | `ema_len`, `vol_thresh`, `atr_sl`, `atr_tp` (144 combos) |
+| `trend_following` | **4h** | Dual EMA, ADX, MACD, ATR | Bullish EMA cross + ADX above threshold + MACD > 0 | Bearish cross, weak trend, or trailing stop | `ema_fast`, `ema_mid`, `adx_thresh`, `atr_trail` (~100 combos) |
+| `mean_reversion` | **4h** | Bollinger Bands, RSI, Volume MA, ATR | Price at lower BB + RSI oversold + volume confirmation | Upper BB + RSI overbought, mean reversion to middle BB, or SL | `bb_len`, `bb_std`, `rsi_os`, `rsi_ob` (81 combos) |
+
+Some Pine Script inputs (time filter, cooldown bars, webhook secret) are not translated because they don't apply to historical backtesting.
+
+### Technical Indicators
+
+All indicators are implemented in pure numpy/pandas to avoid external TA library dependencies:
+
+| Function | Description |
+|----------|-------------|
+| `_ema` | Exponential Moving Average via `pandas.ewm` |
+| `_sma` | Simple Moving Average via rolling window |
+| `_rsi` | Relative Strength Index (rolling mean of gains vs. losses) |
+| `_atr` | Average True Range (max of high−low, |high−prev_close|, |low−prev_close|) |
+| `_bb` | Bollinger Bands (middle ± n × rolling std) |
+| `_adx` | Average Directional Index (+DI, −DI, DX, smoothed ADX) |
+| `_macd` | MACD histogram (fast EMA − slow EMA − signal EMA) |
+| `_vwap` | Rolling Volume-Weighted Average Price over a lookback period |
+
+### Optimisation
+
+Each fold performs a grid search over the strategy's parameter space:
+
+- Iterates every parameter combination in the grid
+- Executes the strategy, computes per-candle returns with transaction costs (exchange fee + slippage deducted on every position change)
+- Calculates the annualised Sharpe ratio (annualisation factor depends on the timeframe: √35,040 for 15m, √2,190 for 4h)
+- Selects the parameter set with the highest Sharpe
+
+### OHLCV Data Caching (MongoDB Timeseries)
+
+OHLCV data is cached in a MongoDB timeseries collection (`ohlcv`) so subsequent backtest runs skip the Binance download entirely:
+
+```
+agent_platform/db/ohlcv_cache.py
+```
+
+- **Collection type:** MongoDB timeseries with `timeField=timestamp`, `metaField=meta` (symbol + timeframe), granularity `minutes`
+- **TTL:** 4 years (`expireAfterSeconds`). MongoDB automatically purges candles older than 4 years — no cron job or manual cleanup needed.
+- **Smart download:** Before fetching from Binance, the cache layer checks the stored date range. If the requested range is fully covered, data is served from MongoDB. If there are gaps at the start or end, only the missing portion is downloaded and appended. This makes the first run slow (Binance API) and all subsequent runs near-instant (MongoDB read).
+
+### API and Streaming
+
+The engine exposes a single endpoint:
+
+```
+POST /api/backtest/run
+```
+
+Request body:
+
+```json
+{
+  "ticker": "BTCUSDT",
+  "start": "2024-01-01",
+  "end": "2025-01-01",
+  "train_days": 14,
+  "test_days": 3,
+  "strategy": "scalping",
+  "exchange_fee": 0.10,
+  "slippage": 0.05
+}
+```
+
+Response: Server-Sent Events (SSE) stream via `StreamingResponse`. Each event is a JSON object with a `type` field:
+
+| Event type | When | Key fields |
+|------------|------|------------|
+| `info` | After data loads | `total_folds`, `data_points`, `timeframe` |
+| `fold` | After each fold completes | `fold_num`, `params`, `train_sharpe`, `oos_return`, `oos_trades` |
+| `complete` | After all folds finish | `is_metrics`, `oos_metrics`, `degradation`, equity curves, fold details |
+| `error` | On failure | `message` |
+
+The frontend consumes this stream via `fetch` + `ReadableStream` and renders fold-by-fold progress in real time.
+
+### Dashboard Sections
+
+The Strategy Backtest page (`/strategy-backtest`) renders four sections after analysis completes:
+
+1. **Walk-Forward Timeline** — horizontal bar chart showing each fold's train (blue) and blind test (orange) windows
+2. **Parameter Shift Table** — shows how the "optimal" parameters change across folds, proving that no single fixed set works across all market regimes
+3. **Illusion vs. Reality** — side-by-side metric cards (total return, Sharpe, max drawdown, trade count) for in-sample vs. out-of-sample, plus degradation figures
+4. **Equity Curve** — overlaid line chart comparing the retail backtest equity (in-sample) against the walk-forward equity (out-of-sample), with shaded bands marking each blind test window
