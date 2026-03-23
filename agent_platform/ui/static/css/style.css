@@ -85,6 +85,27 @@ body {
     flex: 1;
 }
 
+.nav-section {
+    margin-bottom: 0.25rem;
+}
+
+.nav-section + .nav-section {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
+.nav-section-label {
+    display: block;
+    padding: 0.5rem 1.5rem 0.3rem;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: 0.6;
+}
+
 .sidebar a {
     display: flex;
     align-items: center;
