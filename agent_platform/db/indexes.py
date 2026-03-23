@@ -101,6 +101,14 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         IndexModel([("updated_at", DESCENDING)]),
     ])
 
+    # --- Backtest strategies (built-in + custom) ---
+    backtest_strategies = db["backtest_strategies"]
+    await _safe_create_indexes(backtest_strategies, [
+        IndexModel([("created_at", ASCENDING)]),
+        # Sparse unique index so seeded-strategy upserts are idempotent.
+        IndexModel([("_builtin_id", ASCENDING)], unique=True, sparse=True),
+    ])
+
     # --- OHLCV timeseries cache (4-year TTL) ---
     try:
         await db.create_collection(

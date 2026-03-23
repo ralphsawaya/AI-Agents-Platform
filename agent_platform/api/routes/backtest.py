@@ -11,8 +11,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/backtest", tags=["backtest"])
@@ -405,6 +406,16 @@ def _walk_forward(cfg: dict):
     fee = float(cfg.get("exchange_fee", 0.1))
     slip = float(cfg.get("slippage", 0.05))
 
+    if strategy not in _STRATEGY_TIMEFRAMES:
+        yield {
+            "type": "error",
+            "message": (
+                f"Strategy \"{strategy}\" does not have a Python walk-forward implementation. "
+                "Only Scalping, Trend Following, and Mean Reversion are supported by the backtest engine."
+            ),
+        }
+        return
+
     timeframe = _STRATEGY_TIMEFRAMES.get(strategy, "1d")
     ann_factor = _PERIODS_PER_YEAR.get(timeframe, 365)
     date_fmt = "%Y-%m-%d %H:%M" if timeframe != "1d" else "%Y-%m-%d"
@@ -554,7 +565,46 @@ def _walk_forward(cfg: dict):
     }
 
 
-# ── API Endpoint ──────────────────────────────────────────────────────
+# ── Strategy CRUD ─────────────────────────────────────────────────────
+
+class StrategyCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    timeframe: str = Field(..., pattern=r"^(1m|3m|5m|15m|30m|1h|2h|4h|6h|8h|12h|1d|3d|1w)$")
+    description: str = Field("", max_length=500)
+    strategy_rules: str = Field("", max_length=2000)
+    pine_script: str = Field(..., min_length=1)
+
+
+@router.get("/strategies")
+async def get_strategies():
+    from agent_platform.db.repositories.strategy_repo import list_strategies
+    strategies = await list_strategies()
+    return {"strategies": strategies}
+
+
+@router.post("/strategies", status_code=201)
+async def create_strategy(body: StrategyCreate):
+    from agent_platform.db.repositories.strategy_repo import create_strategy as _create
+    strategy = await _create(
+        name=body.name,
+        timeframe=body.timeframe,
+        description=body.description,
+        strategy_rules=body.strategy_rules,
+        pine_script=body.pine_script,
+    )
+    return strategy
+
+
+@router.delete("/strategies/{strategy_id}")
+async def delete_strategy(strategy_id: str):
+    from agent_platform.db.repositories.strategy_repo import delete_strategy as _delete
+    deleted = await _delete(strategy_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Strategy not found")
+    return {"ok": True}
+
+
+# ── Run Endpoint ───────────────────────────────────────────────────────
 
 @router.post("/run")
 async def run_backtest(request: Request):

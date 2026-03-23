@@ -36,6 +36,10 @@ async def lifespan(app: FastAPI):
     await connect_db()
     db = get_database()
     await ensure_indexes(db)
+
+    from agent_platform.db.repositories.strategy_repo import seed_builtin_strategies
+    await seed_builtin_strategies()
+
     Path(settings.AGENTS_STORE_PATH).mkdir(parents=True, exist_ok=True)
 
     from agent_platform.core.scheduler import scheduler_service
