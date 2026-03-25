@@ -1,0 +1,213 @@
+<style>
+.sg-test-call { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:20px 24px; margin-bottom:28px; position:relative; overflow:hidden; }
+.sg-test-call::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg, #38bdf8, #818cf8, #c084fc); }
+.sg-test-call h4 { margin:0 0 4px 0; font-size:0.95rem; font-weight:700; display:flex; align-items:center; gap:8px; }
+.sg-test-call h4 .icon { font-size:1.1rem; }
+.sg-test-call .subtitle { font-size:0.75rem; color:#888; margin-bottom:16px; }
+
+.sg-test-form { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.sg-test-field { display:flex; flex-direction:column; gap:4px; }
+.sg-test-field.full { grid-column:1 / -1; }
+.sg-test-field label { font-size:0.72rem; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:#999; }
+.sg-test-field input,
+.sg-test-field textarea { padding:9px 12px; border-radius:8px; border:1px solid var(--border); background:var(--bg,#111); color:inherit; font-size:0.85rem; font-family:inherit; resize:vertical; }
+.sg-test-field input:focus,
+.sg-test-field textarea:focus { outline:none; border-color:#818cf8; box-shadow:0 0 0 2px rgba(129,140,248,0.15); }
+.sg-test-field textarea { min-height:80px; line-height:1.5; }
+
+.sg-test-actions { grid-column:1 / -1; display:flex; align-items:center; gap:12px; margin-top:4px; }
+.sg-test-btn { padding:9px 22px; border:none; border-radius:8px; font-size:0.85rem; font-weight:600; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; gap:6px; }
+.sg-test-btn-call { background:linear-gradient(135deg, #38bdf8, #818cf8); color:#fff; }
+.sg-test-btn-call:hover { opacity:0.9; transform:translateY(-1px); }
+.sg-test-btn-call:active { transform:translateY(0); }
+.sg-test-btn-call:disabled { opacity:0.4; cursor:not-allowed; transform:none; }
+.sg-test-btn-reset { background:transparent; border:1px solid var(--border); color:#999; }
+.sg-test-btn-reset:hover { border-color:#aaa; color:#ccc; }
+.sg-test-status { font-size:0.8rem; color:#888; margin-left:auto; }
+.sg-test-status.ok { color:#4ade80; }
+.sg-test-status.err { color:#f87171; }
+.sg-test-status .spinner { display:inline-block; width:14px; height:14px; border:2px solid #555; border-top-color:#818cf8; border-radius:50%; animation:sg-spin 0.6s linear infinite; margin-right:6px; vertical-align:middle; }
+@keyframes sg-spin { to { transform:rotate(360deg); } }
+
+.sg-test-log { margin-top:24px; }
+.sg-test-log h4 { font-size:0.88rem; font-weight:700; margin:0 0 12px 0; }
+
+.sg-outcome { display:inline-block; padding:3px 10px; border-radius:10px; font-size:0.72rem; font-weight:600; }
+.sg-outcome-test_pending { background:#1a2a3a; color:#38bdf8; }
+.sg-outcome-interested { background:#1a3a2a; color:#4ade80; }
+.sg-outcome-not_interested { background:#3a1a1a; color:#f87171; }
+.sg-outcome-voicemail { background:#3a2a1a; color:#fbbf24; }
+.sg-outcome-callback_requested { background:#2a1a3a; color:#c084fc; }
+.sg-outcome-no_answer { background:#1a1a2a; color:#94a3b8; }
+
+.text-dim { color:#777; }
+
+.sg-empty { text-align:center; padding:32px 16px; color:#666; font-size:0.85rem; }
+.sg-empty .icon { font-size:2rem; display:block; margin-bottom:8px; }
+
+.sg-pager { display:flex; align-items:center; justify-content:space-between; margin-top:14px; font-size:0.82rem; }
+.sg-pager button { padding:5px 14px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:inherit; cursor:pointer; font-size:0.8rem; }
+.sg-pager button:disabled { opacity:0.35; cursor:default; }
+.sg-pager button:not(:disabled):hover { border-color:var(--primary); }
+</style>
+
+<!-- ============ Test Call Form ============ -->
+<div class="sg-test-call">
+    <h4><span class="icon">📞</span> Test Call</h4>
+    <div class="subtitle">Place a test call to verify your voice API setup and hear the pitch. The call will appear in the log below.</div>
+    <div class="sg-test-form">
+        <div class="sg-test-field">
+            <label>Phone Number</label>
+            <input type="tel" id="sg-test-phone" value="+33668662549" placeholder="+1 555 123 4567" />
+        </div>
+        <div class="sg-test-field">
+            <label>Business Name (simulated)</label>
+            <input type="text" id="sg-test-biz" value="Test Business" placeholder="Acme Plumbing" />
+        </div>
+        <div class="sg-test-field full">
+            <label>Call Script <span style="font-weight:400;color:#666;">(leave blank for default pitch)</span></label>
+            <textarea id="sg-test-script" placeholder="Hi there! This is a quick test call from StrategyGPT…"></textarea>
+        </div>
+        <div class="sg-test-actions">
+            <button class="sg-test-btn sg-test-btn-call" id="sg-test-dial" onclick="_sg_placeTestCall()">
+                <span>📲</span> Place Test Call
+            </button>
+            <button class="sg-test-btn sg-test-btn-reset" onclick="_sg_resetTestForm()">Reset</button>
+            <span class="sg-test-status" id="sg-test-status"></span>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Test Call History ============ -->
+<div class="sg-test-log">
+    <h4>Test Call History</h4>
+    <div id="sg-test-table">
+        <div class="sg-empty"><span class="icon">🧪</span>No test calls yet. Place your first one above.</div>
+    </div>
+    <div class="sg-pager" id="sg-test-pager" style="display:none;">
+        <button id="sg-test-prev" onclick="_sg_testPage(-1)">← Previous</button>
+        <span id="sg-test-info"></span>
+        <button id="sg-test-next" onclick="_sg_testPage(1)">Next →</button>
+    </div>
+</div>
+
+<script>
+(function() {
+    let currentPage = 1;
+    const PAGE_SIZE = 10;
+
+    function fmtLabel(s) {
+        if (!s) return '—';
+        return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+    function fmtTime(t) {
+        if (!t) return '—';
+        return new Date(t).toLocaleString();
+    }
+    function fmtDuration(s) {
+        if (!s && s !== 0) return '—';
+        if (s < 60) return s.toFixed(0) + 's';
+        return Math.floor(s/60) + 'm ' + (s%60).toFixed(0) + 's';
+    }
+
+    async function loadTestCalls() {
+        let url = `/api/strategygpt/calls?page=${currentPage}&limit=${PAGE_SIZE}&is_test=true`;
+        const res = await API.get(url);
+        if (!res.success) return;
+        const d = res.data;
+
+        const testCalls = (d.calls || []).filter(c => c.is_test === true);
+
+        if (!testCalls.length) {
+            document.getElementById('sg-test-table').innerHTML = '<div class="sg-empty"><span class="icon">🧪</span>No test calls yet. Place your first one above.</div>';
+            document.getElementById('sg-test-pager').style.display = 'none';
+            return;
+        }
+
+        let html = `<table>
+            <thead><tr>
+                <th>Time</th><th>Business</th><th>Phone</th>
+                <th>Status</th><th>Duration</th><th>Script Preview</th>
+            </tr></thead><tbody>`;
+
+        for (const c of testCalls) {
+            const preview = c.transcript_summary || '—';
+            const truncated = preview.length > 80 ? preview.slice(0, 80) + '…' : preview;
+            html += `<tr>
+                <td class="text-dim">${fmtTime(c.called_at)}</td>
+                <td><strong>${c.business_name || '—'}</strong></td>
+                <td class="text-dim">${c.phone || '—'}</td>
+                <td><span class="sg-outcome sg-outcome-${c.outcome}">${fmtLabel(c.outcome)}</span></td>
+                <td>${fmtDuration(c.duration_seconds)}</td>
+                <td class="text-dim" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="${preview}">${truncated}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        document.getElementById('sg-test-table').innerHTML = html;
+
+        const pager = document.getElementById('sg-test-pager');
+        pager.style.display = d.pages > 1 ? 'flex' : 'none';
+        document.getElementById('sg-test-info').textContent = `Page ${d.page} of ${d.pages}`;
+        document.getElementById('sg-test-prev').disabled = d.page <= 1;
+        document.getElementById('sg-test-next').disabled = d.page >= d.pages;
+    }
+
+    window._sg_testPage = function(delta) {
+        currentPage += delta;
+        if (currentPage < 1) currentPage = 1;
+        loadTestCalls();
+    };
+
+    window._sg_placeTestCall = async function() {
+        const btn = document.getElementById('sg-test-dial');
+        const status = document.getElementById('sg-test-status');
+        const phone = document.getElementById('sg-test-phone').value.trim();
+        const biz = document.getElementById('sg-test-biz').value.trim() || 'Test Business';
+        const script = document.getElementById('sg-test-script').value.trim();
+
+        if (!phone) {
+            status.className = 'sg-test-status err';
+            status.textContent = 'Enter a phone number';
+            return;
+        }
+
+        btn.disabled = true;
+        status.className = 'sg-test-status';
+        status.innerHTML = '<span class="spinner"></span>Dialling…';
+
+        try {
+            const res = await API.post('/api/strategygpt/test-call', {
+                phone: phone,
+                business_name: biz,
+                script: script,
+            });
+
+            if (res.success) {
+                status.className = 'sg-test-status ok';
+                status.textContent = '\u2713 Call initiated — ' + (res.data.call_id || 'check log');
+                if (typeof toast === 'function') toast('Test call placed successfully');
+                loadTestCalls();
+            } else {
+                status.className = 'sg-test-status err';
+                status.textContent = '\u2717 ' + (res.error || 'Unknown error');
+                if (typeof toast === 'function') toast(res.error || 'Test call failed', 'error');
+            }
+        } catch (e) {
+            status.className = 'sg-test-status err';
+            status.textContent = '\u2717 Network error';
+        }
+        btn.disabled = false;
+    };
+
+    window._sg_resetTestForm = function() {
+        document.getElementById('sg-test-phone').value = '+33668662549';
+        document.getElementById('sg-test-biz').value = 'Test Business';
+        document.getElementById('sg-test-script').value = '';
+        document.getElementById('sg-test-status').textContent = '';
+        document.getElementById('sg-test-status').className = 'sg-test-status';
+    };
+
+    loadTestCalls();
+    window._sg_testCallsInterval = setInterval(loadTestCalls, 20000);
+})();
+</script>

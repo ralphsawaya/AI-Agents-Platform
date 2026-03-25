@@ -1,7 +1,8 @@
 {
     "tabs": [
-        { "id": "dashboard", "label": "Dashboard" },
-        { "id": "leads",     "label": "Leads" },
-        { "id": "calls",     "label": "Calls" }
+        { "id": "dashboard",  "label": "Dashboard" },
+        { "id": "leads",      "label": "Leads" },
+        { "id": "calls",      "label": "Calls" },
+        { "id": "test-calls", "label": "Test Calls" }
     ]
 }
