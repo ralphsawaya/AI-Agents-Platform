@@ -829,6 +829,42 @@ label {
     border: 1px solid rgba(245, 158, 11, 0.25);
 }
 
+/* ── Grouped pills by agent ── */
+.pill-grouped {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.pill-agent-group {
+    padding: 0.65rem 0.9rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    border-left: 3px solid var(--primary);
+}
+
+.pill-agent-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.45rem;
+}
+
+.pill-agent-label {
+    font-size: 0.73rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.pill-agent-count {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    background: var(--surface-3);
+    padding: 0.1rem 0.4rem;
+    border-radius: 999px;
+}
+
 /* ── Collapsible sections (agent detail) ── */
 .collapsible-section {
     border: 1px solid var(--border);
@@ -1382,14 +1418,16 @@ label {
 }
 
 .tab-parent-chevron {
-    font-size: 0.6rem;
-    margin-left: 3px;
-    opacity: 0.5;
+    font-size: 1.1rem;
+    margin-left: 6px;
+    opacity: 0.7;
     display: inline-block;
     transition: transform 0.2s ease;
+    vertical-align: middle;
+    line-height: 1;
 }
 
 .tab.tab-custom-parent.active .tab-parent-chevron {
     transform: rotate(180deg);
-    opacity: 0.8;
+    opacity: 1;
 }

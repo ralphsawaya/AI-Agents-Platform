@@ -130,7 +130,7 @@ Supported field types: `textarea`, `text`, `number`, `select`.
 
 ### Optional: `ui/tabs.json` (Custom Tabs Plugin)
 
-Agent teams can ship custom UI tabs that appear on the agent detail page alongside the standard tabs (Overview, Files, Runs, Schedules, Danger Zone). Define a `ui/tabs.json` file in the zip root:
+Agent teams can ship custom UI tabs that appear on the agent detail page under a **Dashboard** parent tab. When the team has custom tabs, a "Dashboard" entry is added to the main tab bar; clicking it reveals a secondary sub-tab bar containing the team's custom tabs. Define a `ui/tabs.json` file in the zip root:
 
 ```json
 {
@@ -251,7 +251,7 @@ Tabbed interface with standard tabs for all teams, plus optional custom tabs per
 - **Runs** — paginated run history (15 per page, last 100 runs) with inline log viewer and live WebSocket tail
 - **Schedules** — create/edit/delete cron, interval, or one-time schedules
 - **Settings** — LLM provider/model selection and API key management for the team, persisted to MongoDB (`team_settings` collection). Supported providers: Google Gemini (default), Anthropic Claude, DeepSeek, Groq, and OpenAI. API keys can be toggled between masked and visible using the eye icon. For trading teams, also includes the trading kill switch, risk defaults, and indicator period configuration. All teams share the same LLM selection UI; each team's settings are stored independently by agent ID. This tab is built-in and appears automatically for every agent team — no configuration needed.
-- **Custom Tabs** — team-specific tabs loaded as plugins from `ui/tabs/` in the team package (e.g. the trading team ships Trading, Trades, Signals, and Strategy tabs with live dashboard data)
+- **Dashboard** — parent tab that groups all custom team-specific tabs as subsections. When clicked, a secondary navigation bar appears below the main tabs showing the team's custom tabs (e.g. the trading team's Dashboard contains Trading, Trades, Signals, and Strategy sub-tabs). The Dashboard tab and its sub-tab bar share a distinct tinted background with an accent border to visually convey the parent–child hierarchy. Custom tabs are loaded as plugins from `ui/tabs/` in the team package.
 - **Danger Zone** — rebuild virtual environment (re-install dependencies) and permanent deletion with confirmation
 
 ### Monitor

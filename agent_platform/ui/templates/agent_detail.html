@@ -29,9 +29,9 @@
 <div class="tab-content active" id="tab-overview">
     <div class="stat-cards" id="overview-meta"></div>
     <h3 class="mb-1">Detected Nodes</h3>
-    <div id="detected-nodes" class="pill-group mb-1"><span class="text-dim">—</span></div>
+    <div id="detected-nodes" class="mb-1"><span class="text-dim">—</span></div>
     <h3 class="mb-1">Detected Tools</h3>
-    <div id="detected-tools" class="pill-group mb-1"><span class="text-dim">—</span></div>
+    <div id="detected-tools" class="mb-1"><span class="text-dim">—</span></div>
     <h3 class="mb-1">Agent Folders</h3>
     <div id="agent-folders" class="pill-group mb-1"><span class="text-dim">—</span></div>
 
@@ -154,7 +154,51 @@
     .ts-form-row label { flex:0 0 140px;font-size:0.8rem;color:#999; }
     .ts-form-row input { flex:1;padding:6px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:inherit;font-size:0.85rem; }
     .ts-form-row input:focus { outline:none;border-color:var(--primary); }
+    /* General metadata section */
+    .ts-meta-form { padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px; }
+    .ts-meta-row { margin-bottom:14px; }
+    .ts-meta-row:last-child { margin-bottom:0; }
+    .ts-meta-row label { display:block;font-size:0.76rem;font-weight:500;color:#777;margin-bottom:5px; }
+    .ts-meta-row input,
+    .ts-meta-row textarea { width:100%;padding:8px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:inherit;font-size:0.84rem;font-family:inherit; }
+    .ts-meta-row textarea { resize:vertical;min-height:60px; }
+    .ts-meta-row input:focus,
+    .ts-meta-row textarea:focus { outline:none;border-color:var(--primary); }
+    .ts-tag-pills { display:flex;flex-wrap:wrap;gap:6px;margin-top:6px; }
+    .ts-tag-pill { display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:999px;font-size:0.74rem;font-weight:500;background:var(--primary-soft);color:var(--primary);border:1px solid rgba(59,130,246,0.25); }
+    .ts-tag-pill-remove { cursor:pointer;font-size:0.8rem;opacity:0.6;line-height:1; }
+    .ts-tag-pill-remove:hover { opacity:1; }
+    .ts-tag-input-wrap { display:flex;gap:6px;align-items:center; }
+    .ts-tag-input-wrap input { flex:1; }
+    .ts-tag-add-btn { padding:6px 14px;background:var(--surface-3);border:1px solid var(--border);border-radius:6px;color:var(--text-secondary);font-size:0.78rem;cursor:pointer;white-space:nowrap;transition:all 0.15s; }
+    .ts-tag-add-btn:hover { border-color:var(--primary);color:var(--text); }
     </style>
+
+    <!-- General Metadata (all teams) -->
+    <div class="ts-section">
+        <div class="ts-section-title">General</div>
+        <div class="ts-meta-form">
+            <div class="ts-meta-row">
+                <label>Agent Name</label>
+                <input type="text" id="ts-meta-name" placeholder="Agent name" />
+            </div>
+            <div class="ts-meta-row">
+                <label>Description</label>
+                <textarea id="ts-meta-desc" rows="3" placeholder="Optional description (supports Markdown)"></textarea>
+            </div>
+            <div class="ts-meta-row">
+                <label>Tags</label>
+                <div class="ts-tag-pills" id="ts-meta-tag-pills"></div>
+                <div class="ts-tag-input-wrap" style="margin-top:8px">
+                    <input type="text" id="ts-meta-tag-input" placeholder="Add a tag…" onkeydown="if(event.key==='Enter'){event.preventDefault();_ts_addTag()}" />
+                    <button type="button" class="ts-tag-add-btn" onclick="_ts_addTag()">Add</button>
+                </div>
+            </div>
+        </div>
+        <div class="ts-save-row">
+            <button class="ts-btn-save" id="ts-meta-save-btn" onclick="_ts_saveMetadata()">Save General</button>
+        </div>
+    </div>
 
     <!-- LLM Settings (all teams) -->
     <div class="ts-section">
@@ -390,8 +434,28 @@ async function loadAgent() {
         items?.length
             ? items.map(i => `<span class="pill pill-${variant}">${i}</span>`).join('')
             : '<span class="text-dim">—</span>';
-    document.getElementById('detected-nodes').innerHTML  = renderPills(a.detected_nodes,  'node');
-    document.getElementById('detected-tools').innerHTML  = renderPills(a.detected_tools,  'tool');
+    const agentLabel = (folder) => folder.replace(/^agent_/, '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const AGENT_COLORS = ['#6366f1','#3b82f6','#22c55e','#f59e0b','#ef4444','#ec4899','#8b5cf6','#14b8a6'];
+    function renderGroupedPills(byAgent, flatList, variant) {
+        if (byAgent && Object.keys(byAgent).length) {
+            const entries = Object.entries(byAgent);
+            return '<div class="pill-grouped">' + entries.map(([folder, items], i) => {
+                const color = AGENT_COLORS[i % AGENT_COLORS.length];
+                const pills = items.map(n => `<span class="pill pill-${variant}">${n}</span>`).join('');
+                return `<div class="pill-agent-group" style="border-left-color:${color}">
+                    <div class="pill-agent-header">
+                        <span class="pill-agent-label">${agentLabel(folder)}</span>
+                        <span class="pill-agent-count">${items.length}</span>
+                    </div>
+                    <div class="pill-group">${pills}</div>
+                </div>`;
+            }).join('') + '</div>';
+        }
+        if (flatList?.length) return '<div class="pill-group">' + renderPills(flatList, variant) + '</div>';
+        return '<span class="text-dim">—</span>';
+    }
+    document.getElementById('detected-nodes').innerHTML  = renderGroupedPills(a.nodes_by_agent, a.detected_nodes, 'node');
+    document.getElementById('detected-tools').innerHTML  = renderGroupedPills(a.tools_by_agent, a.detected_tools, 'tool');
     document.getElementById('agent-folders').innerHTML   = renderPills(a.agent_folders,   'folder');
 
     const readmeSection = document.getElementById('readme-section');
@@ -1120,6 +1184,68 @@ function _activateScripts(container) {
 }
 
 /* ═══════════════════════════════════════════════
+   Settings tab — General metadata (name / desc / tags)
+   ═══════════════════════════════════════════════ */
+let _metaTags = [];
+
+function _ts_renderTagPills() {
+    const container = document.getElementById('ts-meta-tag-pills');
+    if (!_metaTags.length) {
+        container.innerHTML = '<span class="text-dim text-sm">No tags</span>';
+        return;
+    }
+    container.innerHTML = _metaTags.map((t, i) =>
+        `<span class="ts-tag-pill">${t}<span class="ts-tag-pill-remove" onclick="_ts_removeTag(${i})">✕</span></span>`
+    ).join('');
+}
+
+function _ts_populateMetadata(agent) {
+    document.getElementById('ts-meta-name').value = agent.name || '';
+    document.getElementById('ts-meta-desc').value = agent.description || '';
+    _metaTags = [...(agent.tags || [])];
+    _ts_renderTagPills();
+}
+
+function _ts_addTag() {
+    const inp = document.getElementById('ts-meta-tag-input');
+    const tag = inp.value.trim();
+    if (!tag) return;
+    if (_metaTags.includes(tag)) { inp.value = ''; return; }
+    _metaTags.push(tag);
+    inp.value = '';
+    _ts_renderTagPills();
+}
+
+function _ts_removeTag(index) {
+    _metaTags.splice(index, 1);
+    _ts_renderTagPills();
+}
+
+async function _ts_saveMetadata() {
+    const btn = document.getElementById('ts-meta-save-btn');
+    btn.disabled = true; btn.textContent = 'Saving…';
+
+    const name = document.getElementById('ts-meta-name').value.trim();
+    if (!name) { toast('Name cannot be empty', 'error'); btn.disabled = false; btn.textContent = 'Save General'; return; }
+
+    const body = {
+        name: name,
+        description: document.getElementById('ts-meta-desc').value,
+        tags: _metaTags,
+    };
+
+    const res = await API.put(`/api/agents/${AGENT_ID}/metadata`, body);
+    btn.disabled = false; btn.textContent = 'Save General';
+    if (res.success) {
+        toast('Agent details saved', 'success');
+        document.getElementById('agent-name').textContent = name;
+        loadAgent();
+    } else {
+        toast('Failed to save: ' + (res.error || 'unknown'), 'error');
+    }
+}
+
+/* ═══════════════════════════════════════════════
    Settings tab — LLM config + trading-specific
    ═══════════════════════════════════════════════ */
 (function() {
@@ -1297,8 +1423,8 @@ function _activateScripts(container) {
         return false;
     }
 
-    /* Expose initialiser so loadAgent can call it after agent data is known */
     window._ts_initSettings = function(agent) {
+        _ts_populateMetadata(agent);
         tsLoadSettings();
         if (_isTrading(agent)) {
             document.getElementById('ts-trading-section').style.display = 'block';

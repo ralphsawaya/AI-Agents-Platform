@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, File, Form, Query, UploadFile
+from pydantic import BaseModel
 
 from agent_platform.core import agent_manager
 from agent_platform.core.graph_builder import build_static_graph
@@ -115,6 +116,50 @@ async def rebuild_venv(agent_id: str, force: bool = Query(False)):
 
     asyncio.create_task(create_venv(agent_id, agent["upload_path"]))
     return _ok({"rebuilding": agent_id})
+
+
+class AgentMetadataUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+
+
+@router.put("/{agent_id}/metadata")
+async def update_agent_metadata(agent_id: str, body: AgentMetadataUpdate):
+    """Update an agent's name, description, and/or tags."""
+    agent = await agent_manager.get_agent(agent_id)
+    if not agent:
+        return _err("Agent not found", 404)
+
+    fields: dict[str, Any] = {}
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            return _err("Name cannot be empty")
+        fields["name"] = name
+    if body.description is not None:
+        fields["description"] = body.description
+    if body.tags is not None:
+        fields["tags"] = [t.strip() for t in body.tags if t.strip()]
+
+    if not fields:
+        return _ok(agent)
+
+    from agent_platform.db.client import get_database
+    from agent_platform.db.repositories.agent_repo import AgentRepository
+    from agent_platform.db.repositories.relationship_repo import RelationshipRepository
+
+    repo = AgentRepository(get_database())
+    await repo.update(agent_id, fields)
+
+    if "tags" in fields:
+        rel_repo = RelationshipRepository(get_database())
+        await rel_repo.remove_agent_from_tags(agent_id)
+        for tag in fields["tags"]:
+            await rel_repo.upsert_tag(tag, agent_id)
+
+    updated = await repo.get_by_id(agent_id)
+    return _ok(updated)
 
 
 @router.delete("/{agent_id}")

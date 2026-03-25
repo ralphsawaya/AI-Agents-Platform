@@ -27,6 +27,8 @@ class AgentRepository:
             "source_structure": data.get("source_structure", {}),
             "detected_nodes": data.get("detected_nodes", []),
             "detected_tools": data.get("detected_tools", []),
+            "nodes_by_agent": data.get("nodes_by_agent", {}),
+            "tools_by_agent": data.get("tools_by_agent", {}),
             "run_count": 0,
             "consecutive_failures": 0,
             "last_run_at": None,

@@ -37,10 +37,21 @@ def _repos():
 # ── Source analysis via Python AST ──
 
 
-def _detect_nodes_and_tools(source_dir: Path) -> tuple[list[str], list[str]]:
-    """Walk all .py files and extract LangGraph node names and @tool functions."""
+def _detect_nodes_and_tools(
+    source_dir: Path,
+    agent_folders: list[str] | None = None,
+) -> tuple[list[str], list[str], dict[str, list[str]], dict[str, list[str]]]:
+    """Walk all .py files and extract LangGraph node names and @tool functions.
+
+    Returns flat lists for backward compatibility, plus per-agent-folder
+    breakdowns so the UI can show which nodes/tools belong to which agent.
+    """
     nodes: list[str] = []
     tools: list[str] = []
+    nodes_by_agent: dict[str, list[str]] = {}
+    tools_by_agent: dict[str, list[str]] = {}
+
+    folder_set = set(agent_folders or [])
 
     for py_file in source_dir.rglob("*.py"):
         try:
@@ -48,8 +59,18 @@ def _detect_nodes_and_tools(source_dir: Path) -> tuple[list[str], list[str]]:
         except SyntaxError:
             continue
 
+        owning_folder: str | None = None
+        if folder_set:
+            rel_parts = py_file.relative_to(source_dir).parts
+            if rel_parts and rel_parts[0] in folder_set:
+                owning_folder = rel_parts[0]
+            elif rel_parts and rel_parts[0] == "orchestrator":
+                owning_folder = "orchestrator"
+
+        file_nodes: list[str] = []
+        file_tools: list[str] = []
+
         for node in ast.walk(tree):
-            # Detect graph.add_node("node_name", ...) calls
             if isinstance(node, ast.Call):
                 func = node.func
                 if (
@@ -61,9 +82,8 @@ def _detect_nodes_and_tools(source_dir: Path) -> tuple[list[str], list[str]]:
                     if isinstance(first_arg, ast.Constant) and isinstance(
                         first_arg.value, str
                     ):
-                        nodes.append(first_arg.value)
+                        file_nodes.append(first_arg.value)
 
-            # Detect @tool decorated functions
             if isinstance(node, ast.FunctionDef):
                 for dec in node.decorator_list:
                     dec_name = None
@@ -72,9 +92,17 @@ def _detect_nodes_and_tools(source_dir: Path) -> tuple[list[str], list[str]]:
                     elif isinstance(dec, ast.Attribute):
                         dec_name = dec.attr
                     if dec_name == "tool":
-                        tools.append(node.name)
+                        file_tools.append(node.name)
 
-    return nodes, tools
+        nodes.extend(file_nodes)
+        tools.extend(file_tools)
+
+        if owning_folder and file_nodes:
+            nodes_by_agent.setdefault(owning_folder, []).extend(file_nodes)
+        if owning_folder and file_tools:
+            tools_by_agent.setdefault(owning_folder, []).extend(file_tools)
+
+    return nodes, tools, nodes_by_agent, tools_by_agent
 
 
 def _detect_inter_agent_refs(
@@ -293,7 +321,9 @@ async def register_agent(
     _strip_env_secrets(root_dir / ".env")
 
     source_structure = _build_source_structure(root_dir)
-    detected_nodes, detected_tools = _detect_nodes_and_tools(root_dir)
+    detected_nodes, detected_tools, nodes_by_agent, tools_by_agent = (
+        _detect_nodes_and_tools(root_dir, validation.agent_folders)
+    )
     agent_configs = _parse_agent_configs(root_dir, validation.agent_folders)
     run_config = _parse_run_config(root_dir)
     custom_tabs = _parse_custom_tabs(root_dir)
@@ -316,6 +346,8 @@ async def register_agent(
         "source_structure": source_structure,
         "detected_nodes": detected_nodes,
         "detected_tools": detected_tools,
+        "nodes_by_agent": nodes_by_agent,
+        "tools_by_agent": tools_by_agent,
     }
     if run_config:
         agent_doc["run_config"] = run_config
