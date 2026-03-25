@@ -101,7 +101,7 @@
 
     // ── Paginated call table ──
     async function loadCalls() {
-        let url = `/api/strategygpt/calls?page=${currentPage}&limit=${PAGE_SIZE}`;
+        let url = `/api/strategygpt/calls?page=${currentPage}&limit=${PAGE_SIZE}&is_test=false`;
         if (currentOutcome) url += `&outcome=${currentOutcome}`;
 
         const res = await API.get(url);

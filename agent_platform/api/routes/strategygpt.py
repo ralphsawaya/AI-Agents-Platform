@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -172,6 +173,7 @@ async def get_call_stats():
     col = db["strategygpt_calls"]
 
     pipeline = [
+        {"$match": {"is_test": {"$ne": True}}},
         {"$group": {
             "_id": "$outcome",
             "count": {"$sum": 1},
@@ -240,13 +242,12 @@ async def place_test_call(body: TestCallRequest):
         return _err(f"Virtual environment not ready at {venv_python}")
 
     test_script_code = f'''
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sys, os, json
 sys.path.insert(0, "{team_dir}")
 os.chdir("{team_dir}")
 
 from shared.logger import get_logger
-from agent_voice_caller.tools.voice_tools import place_call, get_call_status
+from agent_voice_caller.tools.voice_tools import place_call
 
 logger = get_logger("test_call")
 
@@ -256,12 +257,21 @@ script = {json.dumps(script)}
 logger.info("Placing test call to %s", phone)
 try:
     result = place_call(phone=phone, script=script)
-    print("CALL_RESULT:" + __import__("json").dumps(result))
+    print("CALL_RESULT:" + json.dumps(result))
 except Exception as exc:
     print("CALL_ERROR:" + str(exc))
 '''
 
     env = {**os.environ}
+
+    # Load integration keys from Settings UI (stored in team_settings)
+    settings_doc = await db["team_settings"].find_one({"_id": agent_id})
+    if settings_doc:
+        for k, v in (settings_doc.get("integration_keys", {})).items():
+            if k and v:
+                env[k] = v
+
+    # Load .env file (non-PLATFORM_MANAGED values override DB values)
     env_file = os.path.join(team_dir, ".env")
     if os.path.isfile(env_file):
         with open(env_file) as f:
@@ -269,7 +279,9 @@ except Exception as exc:
                 line = line.strip()
                 if line and not line.startswith("#") and "=" in line:
                     k, v = line.split("=", 1)
-                    env[k.strip()] = v.strip()
+                    k, v = k.strip(), v.strip()
+                    if k and v and v != "PLATFORM_MANAGED":
+                        env[k] = v
 
     try:
         proc = subprocess.run(
@@ -280,6 +292,10 @@ except Exception as exc:
         stdout = proc.stdout
         stderr = proc.stderr
 
+        if proc.returncode != 0:
+            err_detail = stderr.strip()[-300:] if stderr else stdout.strip()[-300:]
+            return _err(f"Subprocess failed (exit {proc.returncode}): {err_detail}")
+
         if "CALL_ERROR:" in stdout:
             error_msg = stdout.split("CALL_ERROR:")[1].strip()
             return _err(f"Voice API error: {error_msg}")
@@ -288,6 +304,8 @@ except Exception as exc:
         if "CALL_RESULT:" in stdout:
             raw = stdout.split("CALL_RESULT:")[1].strip()
             call_result = json.loads(raw)
+        else:
+            return _err("No response from voice API. stdout: " + (stdout.strip()[-200:] or "(empty)"))
 
         call_id = call_result.get("call_id", "test_" + datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"))
 
@@ -318,3 +336,218 @@ except Exception as exc:
     except Exception as exc:
         logger.error("Test call failed: %s", exc)
         return _err(str(exc)[:500])
+
+
+# -- Refresh pending test-call statuses from Bland.ai --------------------------
+
+BLAND_BASE_URL = "https://api.bland.ai/v1"
+
+
+async def _get_voice_api_key() -> str:
+    """Retrieve the VOICE_API_KEY from team_settings."""
+    db = get_database()
+    agent = await db["agents"].find_one({"root_folder": "strategygpt_agents"})
+    if not agent:
+        return ""
+    doc = await db["team_settings"].find_one({"_id": agent["_id"]})
+    if not doc:
+        return ""
+    return (doc.get("integration_keys") or {}).get("VOICE_API_KEY", "")
+
+
+def _map_bland_disposition(data: dict) -> tuple[str, bool]:
+    """Map Bland.ai call data to a simplified outcome label.
+
+    Returns (outcome, needs_llm) — needs_llm is True when the transcript
+    should be sent to the LLM for classification.
+    """
+    status = (data.get("status") or "").lower()
+    completed_bool = data.get("completed", False)
+    queue = (data.get("queue_status") or "").lower()
+
+    is_done = completed_bool or status == "completed" or queue == "complete"
+    if not is_done:
+        if queue == "queued":
+            return "queued", False
+        return "test_pending", False
+
+    answered_by = data.get("answered_by")
+    transcript = data.get("concatenated_transcript", "")
+    has_user_speech = "user:" in (transcript or "").lower()
+
+    if not answered_by and not has_user_speech:
+        return "no_answer", False
+
+    analysis = data.get("analysis") or {}
+    disposition = (analysis.get("disposition") or "").lower()
+    if disposition in ("interested", "not_interested", "voicemail", "callback_requested", "no_answer"):
+        return disposition, False
+
+    return "needs_llm", True
+
+
+CLASSIFY_PROMPT = (
+    "You are a call outcome classifier. Read the phone call transcript below "
+    "and reply with EXACTLY one word — the call outcome.\n\n"
+    "Possible outcomes:\n"
+    "- interested  (the person wants to learn more or said yes)\n"
+    "- not_interested  (the person declined, said no, or hung up)\n"
+    "- voicemail  (reached voicemail / answering machine)\n"
+    "- callback_requested  (asked to be called back later)\n"
+    "- no_answer  (nobody answered or line was dead)\n\n"
+    "Reply with ONLY the single outcome word, nothing else.\n\n"
+    "TRANSCRIPT:\n"
+)
+
+_LLM_ENDPOINTS = {
+    "claude": "https://api.anthropic.com/v1/messages",
+    "groq": "https://api.groq.com/openai/v1/chat/completions",
+    "openai": "https://api.openai.com/v1/chat/completions",
+    "deepseek": "https://api.deepseek.com/v1/chat/completions",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+}
+
+
+async def _classify_with_llm(transcript: str, settings: dict) -> str | None:
+    """Ask the configured LLM to classify a call transcript."""
+    provider = (settings.get("llm_provider") or "").lower()
+    model = settings.get("llm_model") or ""
+    api_keys = settings.get("api_keys") or {}
+    api_key = api_keys.get(provider, "")
+
+    if not api_key or not provider:
+        return None
+
+    prompt_text = CLASSIFY_PROMPT + transcript[:2000]
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            if provider == "claude":
+                classify_model = "claude-3-haiku-20240307" if "claude" in model else model
+                resp = await client.post(
+                    _LLM_ENDPOINTS["claude"],
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": classify_model,
+                        "max_tokens": 20,
+                        "messages": [{"role": "user", "content": prompt_text}],
+                    },
+                )
+                resp.raise_for_status()
+                text = resp.json()["content"][0]["text"].strip().lower()
+
+            elif provider == "gemini":
+                url = _LLM_ENDPOINTS["gemini"].format(model=model)
+                resp = await client.post(
+                    f"{url}?key={api_key}",
+                    json={
+                        "contents": [{"parts": [{"text": prompt_text}]}],
+                        "generationConfig": {"maxOutputTokens": 20},
+                    },
+                )
+                resp.raise_for_status()
+                text = resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip().lower()
+
+            else:
+                endpoint = _LLM_ENDPOINTS.get(provider)
+                if not endpoint:
+                    return None
+                resp = await client.post(
+                    endpoint,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": model,
+                        "max_tokens": 20,
+                        "messages": [{"role": "user", "content": prompt_text}],
+                    },
+                )
+                resp.raise_for_status()
+                text = resp.json()["choices"][0]["message"]["content"].strip().lower()
+
+        valid = {"interested", "not_interested", "voicemail", "callback_requested", "no_answer"}
+        return text if text in valid else None
+
+    except Exception as exc:
+        logger.warning("LLM classification failed (%s): %s", provider, exc)
+        return None
+
+
+@router.post("/refresh-test-calls")
+async def refresh_test_calls():
+    """Poll Bland.ai for any test calls still in 'test_pending' and update their status."""
+    db = get_database()
+    col = db["strategygpt_calls"]
+
+    pending = await col.find({"is_test": True, "outcome": "test_pending"}).to_list(length=50)
+    if not pending:
+        return _ok({"refreshed": 0})
+
+    api_key = await _get_voice_api_key()
+    if not api_key:
+        return _err("VOICE_API_KEY not configured — cannot poll Bland.ai")
+
+    refreshed = 0
+
+    stale_ids = [c["_id"] for c in pending if (c.get("call_id", "")).startswith("test_")]
+    if stale_ids:
+        await col.update_many(
+            {"_id": {"$in": stale_ids}},
+            {"$set": {"outcome": "expired", "updated_at": datetime.now(timezone.utc)}},
+        )
+        refreshed += len(stale_ids)
+
+    agent = await db["agents"].find_one({"root_folder": "strategygpt_agents"})
+    settings_doc = await db["team_settings"].find_one({"_id": agent["_id"]}) if agent else None
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        for call in pending:
+            call_id = call.get("call_id", "")
+            if not call_id or call_id.startswith("test_"):
+                continue
+            try:
+                resp = await client.get(
+                    f"{BLAND_BASE_URL}/calls/{call_id}",
+                    headers={"Authorization": api_key},
+                )
+                if resp.status_code != 200:
+                    logger.warning("Bland.ai status check %s returned %s", call_id, resp.status_code)
+                    continue
+                data = resp.json()
+                outcome, needs_llm = _map_bland_disposition(data)
+                if outcome == "test_pending":
+                    continue
+                if outcome == "queued":
+                    called_at = call.get("called_at")
+                    if called_at and (datetime.now(timezone.utc) - called_at).total_seconds() > 300:
+                        outcome = "failed"
+                    else:
+                        continue
+
+                transcript = data.get("concatenated_transcript", "")
+                if needs_llm and transcript and settings_doc:
+                    llm_result = await _classify_with_llm(transcript, settings_doc)
+                    if llm_result:
+                        outcome = llm_result
+
+                raw_dur = data.get("corrected_duration") or (data.get("call_length", 0) or 0) * 60
+                duration = float(raw_dur) if raw_dur else 0.0
+                update: dict[str, Any] = {
+                    "outcome": outcome,
+                    "duration_seconds": duration,
+                    "updated_at": datetime.now(timezone.utc),
+                }
+                if transcript:
+                    update["transcript_summary"] = transcript[:500]
+                await col.update_one({"_id": call["_id"]}, {"$set": update})
+                refreshed += 1
+            except Exception as exc:
+                logger.warning("Failed to refresh test call %s: %s", call_id, exc)
+
+    return _ok({"refreshed": refreshed})

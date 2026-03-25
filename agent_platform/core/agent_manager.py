@@ -402,6 +402,7 @@ async def list_agents(
 
 async def delete_agent(agent_id: str) -> bool:
     agent_repo, run_repo, schedule_repo, rel_repo = _repos()
+    db = get_database()
 
     agent = await agent_repo.get_by_id(agent_id)
     if not agent:
@@ -416,9 +417,16 @@ async def delete_agent(agent_id: str) -> bool:
     await schedule_repo.delete_by_agent(agent_id)
     await rel_repo.delete_by_agent(agent_id)
     await rel_repo.remove_agent_from_tags(agent_id)
+
+    # Clean up team settings (LLM config + integration keys)
+    await db["team_settings"].delete_one({"_id": agent_id})
+
+    # Clean up run history
+    await db["agent_runs"].delete_many({"agent_id": agent_id})
+
     await agent_repo.delete(agent_id)
 
-    logger.info("Agent %s deleted", agent_id)
+    logger.info("Agent %s deleted (all related data cleaned up)", agent_id)
     return True
 
 

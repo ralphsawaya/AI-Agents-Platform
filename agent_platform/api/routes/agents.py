@@ -149,11 +149,18 @@ async def update_agent_metadata(agent_id: str, body: AgentMetadataUpdate):
     from agent_platform.db.repositories.agent_repo import AgentRepository
     from agent_platform.db.repositories.relationship_repo import RelationshipRepository
 
-    repo = AgentRepository(get_database())
+    db = get_database()
+    repo = AgentRepository(db)
     await repo.update(agent_id, fields)
 
+    if "name" in fields:
+        await db["team_settings"].update_one(
+            {"_id": agent_id},
+            {"$set": {"agent_name": fields["name"]}},
+        )
+
     if "tags" in fields:
-        rel_repo = RelationshipRepository(get_database())
+        rel_repo = RelationshipRepository(db)
         await rel_repo.remove_agent_from_tags(agent_id)
         for tag in fields["tags"]:
             await rel_repo.upsert_tag(tag, agent_id)

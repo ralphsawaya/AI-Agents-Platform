@@ -95,7 +95,16 @@ async def execute_agent(
     env["AGENT_RUN_ID"] = run_id
     env["AGENT_ARGS"] = json.dumps(args or {})
 
-    # Load the team's own .env file if it exists in the agent root directory
+    # Load integration keys from Settings UI (stored in team_settings collection)
+    settings_doc = await db["team_settings"].find_one({"_id": agent_id})
+    if settings_doc:
+        integration_keys = settings_doc.get("integration_keys", {})
+        for key, value in integration_keys.items():
+            if key and value:
+                env[key] = value
+                logger.debug("Injected integration key %s from settings", key)
+
+    # Load the team's own .env file if it exists (overrides DB values)
     team_env_path = root_dir / ".env"
     if team_env_path.exists():
         logger.info("Loading team .env from %s", team_env_path)
