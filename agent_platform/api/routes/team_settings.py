@@ -1,15 +1,17 @@
-"""Per-team LLM settings and integration keys API.
+"""Per-team LLM / Voice / integration settings API.
 
 Each agent team gets its own settings document (keyed by agent_id) in the
 ``team_settings`` MongoDB collection.  The Settings tab on the agent detail
 page reads/writes through these endpoints.
 
-Integration keys (API keys for third-party services) are stored in
-``integration_keys`` within the same document and injected into the agent's
-environment at runtime by the executor.
+All runtime configuration — LLM provider, Voice provider, API keys,
+integration keys — is stored exclusively in MongoDB and injected into the
+agent subprocess environment by the executor.  No values are read from
+.env files at runtime.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agents", tags=["team-settings"])
 
+# ---------------------------------------------------------------------------
+# LLM providers
+# ---------------------------------------------------------------------------
+
 PROVIDER_MODELS = {
     "gemini": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"],
     "claude": ["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022"],
@@ -34,16 +40,34 @@ PROVIDER_MODELS = {
 DEFAULT_PROVIDER = "gemini"
 DEFAULT_MODEL = "gemini-2.5-flash"
 
+LLM_PROVIDER_TO_ENV_KEY: dict[str, str] = {
+    "claude": "ANTHROPIC_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+}
+
+# ---------------------------------------------------------------------------
+# Voice AI providers (shown only for teams that use voice)
+# ---------------------------------------------------------------------------
+
+VOICE_PROVIDERS: dict[str, list[str]] = {
+    "bland": ["maya", "josh", "default"],
+}
+
+DEFAULT_VOICE_PROVIDER = "bland"
+DEFAULT_VOICE_VOICE = "maya"
+
 # ---------------------------------------------------------------------------
 # Integration registry — known API keys with human-readable metadata.
-# Teams declare which keys they need by including them in their .env file.
+# Teams declare which keys they need via os.getenv() in shared/config.py.
 # The Settings UI reads the registry to render labelled input fields.
 # ---------------------------------------------------------------------------
 INTEGRATION_REGISTRY: dict[str, dict[str, str]] = {
-    # Voice / telephony
     "VOICE_API_KEY": {
         "label": "Voice API Key",
-        "description": "API key for the voice call provider (Bland.ai, Vapi, Twilio, etc.)",
+        "description": "API key for the voice call provider",
         "category": "Voice & Telephony",
     },
     "TWILIO_ACCOUNT_SID": {
@@ -61,39 +85,11 @@ INTEGRATION_REGISTRY: dict[str, dict[str, str]] = {
         "description": "API key for Vapi voice platform",
         "category": "Voice & Telephony",
     },
-    # Maps & location
     "GOOGLE_MAPS_API_KEY": {
         "label": "Google Maps API Key",
         "description": "API key for Google Maps / Places API",
         "category": "Maps & Location",
     },
-    # LLM keys (also in LLM section, but exposed here for completeness)
-    "GROQ_API_KEY": {
-        "label": "Groq API Key",
-        "description": "API key for Groq inference",
-        "category": "LLM Providers",
-    },
-    "GEMINI_API_KEY": {
-        "label": "Google Gemini API Key",
-        "description": "API key for Google Gemini models",
-        "category": "LLM Providers",
-    },
-    "ANTHROPIC_API_KEY": {
-        "label": "Anthropic API Key",
-        "description": "API key for Claude models",
-        "category": "LLM Providers",
-    },
-    "OPENAI_API_KEY": {
-        "label": "OpenAI API Key",
-        "description": "API key for OpenAI / GPT models",
-        "category": "LLM Providers",
-    },
-    "DEEPSEEK_API_KEY": {
-        "label": "DeepSeek API Key",
-        "description": "API key for DeepSeek models",
-        "category": "LLM Providers",
-    },
-    # Trading
     "BINANCE_API_KEY": {
         "label": "Binance API Key",
         "description": "Binance exchange API key",
@@ -109,22 +105,15 @@ INTEGRATION_REGISTRY: dict[str, dict[str, str]] = {
         "description": "Secret for TradingView webhook authentication",
         "category": "Trading",
     },
-    # Database
-    "MONGODB_URI": {
-        "label": "MongoDB URI",
-        "description": "MongoDB connection string",
-        "category": "Database",
-    },
 }
 
-# Keys that should NOT be shown in the Integrations UI.
-# LLM keys are excluded because they are managed via the LLM Configuration
-# dropdown section (which already saves them to api_keys in team_settings).
 _SKIP_KEYS = {
-    "LLM_PROVIDER", "LLM_MODEL", "VOICE_API_PROVIDER",
+    "LLM_PROVIDER", "LLM_MODEL", "LLM_TEMPERATURE", "MAX_TOKENS",
+    "VOICE_API_PROVIDER", "VOICE_API_KEY",
     "AGENT_ID", "AGENT_RUN_ID", "AGENT_ARGS",
     "GROQ_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
+    "MONGODB_URI", "MONGODB_DB", "MONGODB_COLLECTION",
 }
 
 
@@ -138,41 +127,73 @@ def _err(msg: str) -> dict:
 
 def _mask_key(value: str) -> str:
     """Return a masked version of a secret for display (e.g. 'sk-abc…xyz')."""
-    if not value or value == "PLATFORM_MANAGED":
+    if not value:
         return ""
     if len(value) <= 8:
         return "••••••••"
     return value[:4] + "••••" + value[-4:]
 
 
-def _scan_env_keys(agent: dict) -> list[str]:
-    """Parse the team's .env file and return env var names that look like
-    integration keys (present in INTEGRATION_REGISTRY or unknown but non-skip).
+_GETENV_RE = re.compile(r"""os\.getenv\(\s*['"]([A-Z][A-Z0-9_]+)['"]""")
+
+
+def _scan_required_keys(agent: dict) -> list[str]:
+    """Scan the team's Python source for os.getenv() calls and return env var
+    names that are integration keys (present in INTEGRATION_REGISTRY and not
+    in _SKIP_KEYS).  This replaces .env parsing — the source code itself
+    declares what keys the team needs.
     """
     upload_path = agent.get("upload_path", "")
     root_folder = agent.get("root_folder", "")
     if not upload_path:
         return []
 
-    env_path = Path(upload_path) / root_folder / ".env"
-    if not env_path.is_file():
+    root = Path(upload_path) / root_folder
+    if not root.is_dir():
         return []
 
-    keys: list[str] = []
-    for line in env_path.read_text().splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#") or "=" not in stripped:
+    found: set[str] = set()
+    for py_file in root.rglob("*.py"):
+        try:
+            text = py_file.read_text(errors="ignore")
+        except OSError:
             continue
-        key = stripped.partition("=")[0].strip()
-        if key and key not in _SKIP_KEYS:
-            keys.append(key)
-    return keys
+        for match in _GETENV_RE.finditer(text):
+            key = match.group(1)
+            if key not in _SKIP_KEYS and key in INTEGRATION_REGISTRY:
+                found.add(key)
+
+    return sorted(found)
+
+
+def _team_has_voice(agent: dict) -> bool:
+    """Return True if the team's source code references VOICE_API_KEY or
+    VOICE_API_PROVIDER, indicating it uses voice capabilities.
+    """
+    upload_path = agent.get("upload_path", "")
+    root_folder = agent.get("root_folder", "")
+    if not upload_path:
+        return False
+    root = Path(upload_path) / root_folder
+    if not root.is_dir():
+        return False
+    for py_file in root.rglob("*.py"):
+        try:
+            text = py_file.read_text(errors="ignore")
+        except OSError:
+            continue
+        if "VOICE_API_KEY" in text or "VOICE_API_PROVIDER" in text:
+            return True
+    return False
 
 
 class TeamSettingsUpdate(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     api_keys: dict | None = None
+    voice_provider: str | None = None
+    voice_voice: str | None = None
+    voice_api_key: str | None = None
 
 
 class IntegrationKeysUpdate(BaseModel):
@@ -181,30 +202,40 @@ class IntegrationKeysUpdate(BaseModel):
 
 @router.get("/{agent_id}/settings")
 async def get_team_settings(agent_id: str):
-    """Return persisted LLM settings for an agent team."""
+    """Return persisted LLM + Voice settings for an agent team."""
     db = get_database()
     doc = await db["team_settings"].find_one({"_id": agent_id})
+
+    agent = await db["agents"].find_one({"_id": agent_id})
+    has_voice = _team_has_voice(agent) if agent else False
+
     if not doc:
-        return _ok({
-            "llm_provider": DEFAULT_PROVIDER,
-            "llm_model": DEFAULT_MODEL,
-            "api_keys": {},
-            "providers": PROVIDER_MODELS,
-        })
+        doc = {}
 
     doc.pop("_id", None)
     doc.pop("updated_at", None)
+    doc.pop("agent_name", None)
+
+    raw_integ_keys = doc.pop("integration_keys", {}) or {}
 
     doc.setdefault("api_keys", {})
     doc["providers"] = PROVIDER_MODELS
     doc.setdefault("llm_provider", DEFAULT_PROVIDER)
     doc.setdefault("llm_model", DEFAULT_MODEL)
+
+    doc["has_voice"] = has_voice
+    if has_voice:
+        doc["voice_providers"] = VOICE_PROVIDERS
+        doc.setdefault("voice_provider", DEFAULT_VOICE_PROVIDER)
+        doc.setdefault("voice_voice", DEFAULT_VOICE_VOICE)
+        doc["voice_api_key_masked"] = _mask_key(raw_integ_keys.get("VOICE_API_KEY", ""))
+
     return _ok(doc)
 
 
 @router.put("/{agent_id}/settings")
 async def update_team_settings(agent_id: str, body: TeamSettingsUpdate):
-    """Save LLM settings for an agent team."""
+    """Save LLM + Voice settings for an agent team."""
     db = get_database()
 
     update: dict[str, Any] = {}
@@ -212,12 +243,24 @@ async def update_team_settings(agent_id: str, body: TeamSettingsUpdate):
         update["llm_provider"] = body.llm_provider
     if body.llm_model is not None:
         update["llm_model"] = body.llm_model
+    if body.voice_provider is not None:
+        update["voice_provider"] = body.voice_provider
+    if body.voice_voice is not None:
+        update["voice_voice"] = body.voice_voice
+
+    existing = None
+    if body.api_keys or body.voice_api_key:
+        existing = await db["team_settings"].find_one({"_id": agent_id})
 
     if body.api_keys:
-        existing = await db["team_settings"].find_one({"_id": agent_id})
         merged_keys = (existing or {}).get("api_keys", {})
         merged_keys.update(body.api_keys)
         update["api_keys"] = merged_keys
+
+    if body.voice_api_key:
+        integ_keys = (existing or {}).get("integration_keys", {})
+        integ_keys["VOICE_API_KEY"] = body.voice_api_key
+        update["integration_keys"] = integ_keys
 
     if update:
         agent = await db["agents"].find_one({"_id": agent_id}, {"name": 1})
@@ -245,7 +288,7 @@ async def get_integrations(agent_id: str):
     if not agent:
         return _err("Agent not found")
 
-    env_keys = _scan_env_keys(agent)
+    env_keys = _scan_required_keys(agent)
 
     doc = await db["team_settings"].find_one({"_id": agent_id})
     saved_keys: dict[str, str] = (doc or {}).get("integration_keys", {})

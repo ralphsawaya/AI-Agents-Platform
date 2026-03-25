@@ -1,5 +1,6 @@
-"""Summarize node — uses Groq LLM to create a concise summary."""
+"""Summarize node — uses the configured LLM to create a concise summary."""
 
+import os
 import time
 
 from shared.llm import get_llm
@@ -18,7 +19,9 @@ def summarize_node(state: dict) -> dict:
     text = state["input_text"]
     prompt = SUMMARIZE_TEMPLATE.format(text=text)
 
-    logger.info("Calling Groq LLM for summarization…")
+    provider = os.getenv("LLM_PROVIDER", "unknown")
+    model = os.getenv("LLM_MODEL", "")
+    logger.info("Calling %s LLM (%s) for summarization…", provider.capitalize(), model)
     summary = llm.invoke(prompt)
 
     logger.info("Summary generated: %d words — post-processing (15s)…", word_count(summary))

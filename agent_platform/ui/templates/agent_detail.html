@@ -224,47 +224,74 @@
         </div>
     </div>
 
-    <!-- LLM Settings (all teams) -->
-    <div class="ts-section">
-        <div class="ts-section-title">LLM Configuration</div>
-        <div class="ts-bar">
-            <div class="ts-field">
-                <span class="ts-field-label">Provider</span>
-                <select id="ts-llm-provider" onchange="_ts_onProviderChange()">
-                    <option value="gemini">Google Gemini</option>
-                    <option value="claude">Anthropic Claude</option>
-                    <option value="deepseek">DeepSeek</option>
-                    <option value="groq">Groq</option>
-                    <option value="openai">OpenAI</option>
-                </select>
-            </div>
-            <div class="ts-field">
-                <span class="ts-field-label">Model</span>
-                <select id="ts-llm-model"></select>
-            </div>
-            <div class="ts-bar-sep"></div>
-            <div class="ts-field">
-                <span class="ts-field-label" id="ts-api-key-label">API Key</span>
-                <input type="password" id="ts-api-key" placeholder="Enter API key" autocomplete="off" />
-                <button type="button" class="ts-eye-btn" id="ts-eye-btn" onclick="_ts_toggleKeyVisibility()" title="Show key"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
-            </div>
-        </div>
-        <div class="ts-save-row">
-            <button class="ts-btn-save" id="ts-save-btn" onclick="_ts_saveSettings()">Save Settings</button>
-        </div>
-    </div>
-
-    <!-- Integrations (API Keys) — auto-detected from team .env -->
-    <div class="ts-integ-section" id="ts-integ-section" style="display:none;">
+    <!-- Integrations — LLM, Voice AI, and auto-detected API keys -->
+    <div class="ts-integ-section" id="ts-integ-section">
         <div class="ts-integ-header">
             <div class="ts-section-title">Integrations</div>
             <span class="ts-integ-badge none" id="ts-integ-badge"></span>
         </div>
-        <div id="ts-integ-body">
-            <div class="ts-integ-empty">Scanning team integrations…</div>
+
+        <!-- LLM Provider -->
+        <div class="ts-integ-category">
+            <div class="ts-integ-cat-title">
+                <span class="ts-integ-cat-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4v1a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V6a4 4 0 0 1 4-4z"/><rect x="3" y="10" width="18" height="12" rx="2"/><circle cx="8.5" cy="15.5" r="1.5"/><circle cx="15.5" cy="15.5" r="1.5"/><path d="M9 19h6"/></svg></span>
+                LLM Provider
+            </div>
+            <div class="ts-bar">
+                <div class="ts-field">
+                    <span class="ts-field-label">Provider</span>
+                    <select id="ts-llm-provider" onchange="_ts_onProviderChange()">
+                        <option value="gemini">Google Gemini</option>
+                        <option value="claude">Anthropic Claude</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="groq">Groq</option>
+                        <option value="openai">OpenAI</option>
+                    </select>
+                </div>
+                <div class="ts-field">
+                    <span class="ts-field-label">Model</span>
+                    <select id="ts-llm-model"></select>
+                </div>
+                <div class="ts-bar-sep"></div>
+                <div class="ts-field">
+                    <span class="ts-field-label" id="ts-api-key-label">API Key</span>
+                    <input type="password" id="ts-api-key" placeholder="Enter API key" autocomplete="off" />
+                    <button type="button" class="ts-eye-btn" id="ts-eye-btn" onclick="_ts_toggleKeyVisibility()" title="Show key"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                </div>
+            </div>
         </div>
+
+        <!-- Voice AI (only for teams with voice capabilities) -->
+        <div class="ts-integ-category" id="ts-voice-section" style="display:none;">
+            <div class="ts-integ-cat-title">
+                <span class="ts-integ-cat-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.362 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.338 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></span>
+                Voice AI
+            </div>
+            <div class="ts-bar">
+                <div class="ts-field">
+                    <span class="ts-field-label">Provider</span>
+                    <select id="ts-voice-provider" onchange="_ts_onVoiceProviderChange()">
+                        <option value="bland">Bland.ai</option>
+                    </select>
+                </div>
+                <div class="ts-field">
+                    <span class="ts-field-label">Voice</span>
+                    <select id="ts-voice-voice"></select>
+                </div>
+                <div class="ts-bar-sep"></div>
+                <div class="ts-field">
+                    <span class="ts-field-label">API Key</span>
+                    <input type="password" id="ts-voice-api-key" placeholder="Enter API key" autocomplete="off" />
+                    <button type="button" class="ts-eye-btn" id="ts-voice-eye-btn" onclick="_ts_toggleVoiceKeyVisibility()" title="Show key"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Auto-detected integration keys (Maps, etc.) -->
+        <div id="ts-integ-body"></div>
+
         <div class="ts-save-row">
-            <button class="ts-btn-save" id="ts-integ-save-btn" onclick="_ts_saveIntegrations()">Save Integrations</button>
+            <button class="ts-btn-save" id="ts-integ-save-btn" onclick="_ts_saveAllIntegrations()">Save Integrations</button>
         </div>
     </div>
 
@@ -1347,9 +1374,10 @@ async function _ts_saveMetadata() {
     const _eyeOpen = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
     const _eyeOff = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 
-    window._ts_toggleKeyVisibility = function() {
-        const inp = document.getElementById('ts-api-key');
-        const btn = document.getElementById('ts-eye-btn');
+    function _tsToggleEye(inputId, btnId) {
+        const inp = document.getElementById(inputId);
+        const btn = document.getElementById(btnId);
+        if (!inp || !btn) return;
         if (inp.type === 'password') {
             inp.type = 'text';
             inp.classList.add('ts-api-input');
@@ -1361,12 +1389,34 @@ async function _ts_saveMetadata() {
             btn.innerHTML = _eyeOpen;
             btn.title = 'Show key';
         }
-    };
+    }
+
+    window._ts_toggleKeyVisibility = function() { _tsToggleEye('ts-api-key', 'ts-eye-btn'); };
+    window._ts_toggleVoiceKeyVisibility = function() { _tsToggleEye('ts-voice-api-key', 'ts-voice-eye-btn'); };
 
     window._ts_onProviderChange = function() {
         const p = document.getElementById('ts-llm-provider').value;
         tsPopulateModels(p, (_tsProviderModels[p] || [])[0] || '');
         tsUpdateApiKeyField(p);
+    };
+
+    let _tsVoiceProviders = {};
+
+    function tsPopulateVoices(provider, selectedVoice) {
+        const sel = document.getElementById('ts-voice-voice');
+        if (!sel) return;
+        sel.innerHTML = '';
+        (_tsVoiceProviders[provider] || []).forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v; opt.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+            if (v === selectedVoice) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    window._ts_onVoiceProviderChange = function() {
+        const p = document.getElementById('ts-voice-provider').value;
+        tsPopulateVoices(p, (_tsVoiceProviders[p] || [])[0] || '');
     };
 
     async function tsLoadSettings() {
@@ -1380,28 +1430,20 @@ async function _ts_saveMetadata() {
         document.getElementById('ts-llm-provider').value = provider;
         tsPopulateModels(provider, c.llm_model || '');
         tsUpdateApiKeyField(provider);
+
+        if (c.has_voice) {
+            document.getElementById('ts-voice-section').style.display = '';
+            if (c.voice_providers) _tsVoiceProviders = c.voice_providers;
+            const vp = c.voice_provider || 'bland';
+            document.getElementById('ts-voice-provider').value = vp;
+            tsPopulateVoices(vp, c.voice_voice || '');
+            const voiceKeyInp = document.getElementById('ts-voice-api-key');
+            const maskedVoiceKey = c.voice_api_key_masked || '';
+            voiceKeyInp.value = maskedVoiceKey;
+            voiceKeyInp.placeholder = maskedVoiceKey ? '' : 'Enter API key';
+            voiceKeyInp.dataset.hasSaved = maskedVoiceKey ? '1' : '';
+        }
     }
-
-    window._ts_saveSettings = async function() {
-        const btn = document.getElementById('ts-save-btn');
-        btn.disabled = true; btn.textContent = 'Saving…';
-
-        const provider  = document.getElementById('ts-llm-provider').value;
-        const apiKeyVal = document.getElementById('ts-api-key').value.trim();
-        const apiKeys = {};
-        if (apiKeyVal) apiKeys[provider] = apiKeyVal;
-
-        const body = {
-            llm_provider: provider,
-            llm_model: document.getElementById('ts-llm-model').value,
-            api_keys: Object.keys(apiKeys).length ? apiKeys : undefined,
-        };
-
-        const res = await API.put(`/api/agents/${AGENT_ID}/settings`, body);
-        btn.disabled = false; btn.textContent = 'Save Settings';
-        if (res.success) { toast('Settings saved', 'success'); tsLoadSettings(); }
-        else { toast('Failed to save: ' + (res.error || 'unknown'), 'error'); }
-    };
 
     /* -- Trading-specific settings -- */
 
@@ -1505,33 +1547,34 @@ async function _ts_saveMetadata() {
 
         const data = res.data;
         _integData = data;
-        const section = document.getElementById('ts-integ-section');
         const body = document.getElementById('ts-integ-body');
         const badge = document.getElementById('ts-integ-badge');
 
-        if (!data.total_keys) {
-            section.style.display = 'none';
-            return;
-        }
+        const llmKeySet = !!Object.values(_tsLoadedApiKeys).some(v => v);
+        const voiceSection = document.getElementById('ts-voice-section');
+        const voiceVisible = voiceSection && voiceSection.style.display !== 'none';
+        const voiceKeyInp = document.getElementById('ts-voice-api-key');
+        const voiceKeySet = voiceVisible && voiceKeyInp && voiceKeyInp.dataset.hasSaved === '1';
 
-        section.style.display = '';
+        const integConfigured = data.configured_keys || 0;
+        const integTotal = data.total_keys || 0;
+        const totalKeys = integTotal + 1 + (voiceVisible ? 1 : 0);
+        const configuredKeys = integConfigured + (llmKeySet ? 1 : 0) + (voiceKeySet ? 1 : 0);
 
-        const configured = data.configured_keys || 0;
-        const total = data.total_keys || 0;
-        if (configured === total) {
+        if (configuredKeys === totalKeys) {
             badge.className = 'ts-integ-badge all-set';
-            badge.textContent = `${configured}/${total} configured`;
-        } else if (configured > 0) {
+            badge.textContent = `${configuredKeys}/${totalKeys} configured`;
+        } else if (configuredKeys > 0) {
             badge.className = 'ts-integ-badge partial';
-            badge.textContent = `${configured}/${total} configured`;
+            badge.textContent = `${configuredKeys}/${totalKeys} configured`;
         } else {
             badge.className = 'ts-integ-badge none';
-            badge.textContent = `0/${total} configured`;
+            badge.textContent = `0/${totalKeys} configured`;
         }
 
         const cats = data.categories || {};
         if (!Object.keys(cats).length) {
-            body.innerHTML = '<div class="ts-integ-empty">No integrations detected for this team.</div>';
+            body.innerHTML = '';
             return;
         }
 
@@ -1570,12 +1613,12 @@ async function _ts_saveMetadata() {
                 if (inp.type === 'password') {
                     inp.type = 'text';
                     inp.classList.add('ts-api-input');
-                    this.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+                    this.innerHTML = _eyeOff;
                     this.title = 'Hide key';
                 } else {
                     inp.type = 'password';
                     inp.classList.remove('ts-api-input');
-                    this.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+                    this.innerHTML = _eyeOpen;
                     this.title = 'Show key';
                 }
             });
@@ -1592,35 +1635,72 @@ async function _ts_saveMetadata() {
         });
     }
 
-    window._ts_saveIntegrations = async function() {
+    /* Voice API key field: clear on focus like integration keys */
+    (function() {
+        const voiceInp = document.getElementById('ts-voice-api-key');
+        if (voiceInp) {
+            voiceInp.addEventListener('focus', function() {
+                if (this.dataset.hasSaved === '1') {
+                    this.value = '';
+                    this.placeholder = 'Enter new key…';
+                    this.dataset.hasSaved = '';
+                }
+            });
+        }
+    })();
+
+    window._ts_saveAllIntegrations = async function() {
         const btn = document.getElementById('ts-integ-save-btn');
         btn.disabled = true; btn.textContent = 'Saving…';
 
+        /* -- LLM + Voice settings -- */
+        const provider  = document.getElementById('ts-llm-provider').value;
+        const apiKeyVal = document.getElementById('ts-api-key').value.trim();
+        const llmApiKeys = {};
+        if (apiKeyVal) llmApiKeys[provider] = apiKeyVal;
+
+        const settingsBody = {
+            llm_provider: provider,
+            llm_model: document.getElementById('ts-llm-model').value,
+            api_keys: Object.keys(llmApiKeys).length ? llmApiKeys : undefined,
+        };
+
+        const voiceSection = document.getElementById('ts-voice-section');
+        if (voiceSection && voiceSection.style.display !== 'none') {
+            settingsBody.voice_provider = document.getElementById('ts-voice-provider').value;
+            settingsBody.voice_voice = document.getElementById('ts-voice-voice').value;
+            const voiceKeyVal = document.getElementById('ts-voice-api-key').value.trim();
+            if (voiceKeyVal && document.getElementById('ts-voice-api-key').dataset.hasSaved !== '1') {
+                settingsBody.voice_api_key = voiceKeyVal;
+            }
+        }
+
+        const settingsRes = await API.put(`/api/agents/${AGENT_ID}/settings`, settingsBody);
+
+        /* -- Other integration keys -- */
         const inputs = document.querySelectorAll('.ts-integ-input[data-integ-key]');
-        const keys = {};
-        let count = 0;
+        const integKeys = {};
         inputs.forEach(inp => {
             const val = inp.value.trim();
             if (val && inp.dataset.hasSaved !== '1') {
-                keys[inp.dataset.integKey] = val;
-                count++;
+                integKeys[inp.dataset.integKey] = val;
             }
         });
 
-        if (!count) {
-            btn.disabled = false; btn.textContent = 'Save Integrations';
-            toast('No new keys to save — enter or update a key first', 'error');
-            return;
+        let integRes = { success: true };
+        if (Object.keys(integKeys).length) {
+            integRes = await API.put(`/api/agents/${AGENT_ID}/integrations`, { keys: integKeys });
         }
 
-        const res = await API.put(`/api/agents/${AGENT_ID}/integrations`, { keys });
         btn.disabled = false; btn.textContent = 'Save Integrations';
 
-        if (res.success) {
-            toast(`${count} integration key(s) saved`, 'success');
+        if (settingsRes.success && integRes.success) {
+            toast('All integrations saved', 'success');
+            tsLoadSettings();
             tsLoadIntegrations();
         } else {
-            toast('Failed to save: ' + (res.error || 'unknown'), 'error');
+            const err = (!settingsRes.success ? settingsRes.error : integRes.error) || 'unknown';
+            toast('Failed to save: ' + err, 'error');
         }
     };
 

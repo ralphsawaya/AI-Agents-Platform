@@ -53,6 +53,11 @@
 .sg-pager button { padding:5px 14px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:inherit; cursor:pointer; font-size:0.8rem; }
 .sg-pager button:disabled { opacity:0.35; cursor:default; }
 .sg-pager button:not(:disabled):hover { border-color:var(--primary); }
+.sg-test-log-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.sg-test-log-header h4 { margin:0; }
+.sg-clear-btn { padding:6px 16px; border-radius:6px; border:1px solid rgba(239,68,68,0.3); background:rgba(239,68,68,0.08); color:#f87171; font-size:0.78rem; font-weight:600; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; gap:5px; }
+.sg-clear-btn:hover { background:rgba(239,68,68,0.18); border-color:rgba(239,68,68,0.5); }
+.sg-clear-btn:disabled { opacity:0.4; cursor:not-allowed; }
 </style>
 
 <!-- ============ Test Call Form ============ -->
@@ -84,7 +89,10 @@
 
 <!-- ============ Test Call History ============ -->
 <div class="sg-test-log">
-    <h4>Test Call History</h4>
+    <div class="sg-test-log-header">
+        <h4>Test Call History</h4>
+        <button class="sg-clear-btn" id="sg-clear-tests" onclick="_sg_clearTestCalls()">🗑 Clear All</button>
+    </div>
     <div id="sg-test-table">
         <div class="sg-empty"><span class="icon">🧪</span>No test calls yet. Place your first one above.</div>
     </div>
@@ -227,6 +235,25 @@
             if (ticks >= 24) { clearInterval(_pollTimer); _pollTimer = null; }
         }, 5000);
     }
+
+    window._sg_clearTestCalls = async function() {
+        if (!confirm('Delete all test calls? This cannot be undone.')) return;
+        const btn = document.getElementById('sg-clear-tests');
+        btn.disabled = true; btn.textContent = 'Clearing…';
+        try {
+            const res = await API.del('/api/strategygpt/test-calls');
+            if (res.success) {
+                if (typeof toast === 'function') toast(`${res.data.deleted || 0} test call(s) deleted`, 'success');
+                currentPage = 1;
+                loadTestCalls();
+            } else {
+                if (typeof toast === 'function') toast(res.error || 'Failed to clear', 'error');
+            }
+        } catch(e) {
+            if (typeof toast === 'function') toast('Network error', 'error');
+        }
+        btn.disabled = false; btn.innerHTML = '🗑 Clear All';
+    };
 
     loadTestCalls();
     window._sg_testCallsInterval = setInterval(loadTestCalls, 20000);

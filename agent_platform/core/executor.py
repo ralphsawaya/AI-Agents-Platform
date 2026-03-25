@@ -95,27 +95,35 @@ async def execute_agent(
     env["AGENT_RUN_ID"] = run_id
     env["AGENT_ARGS"] = json.dumps(args or {})
 
-    # Load integration keys from Settings UI (stored in team_settings collection)
+    # All settings come from MongoDB — no .env files
     settings_doc = await db["team_settings"].find_one({"_id": agent_id})
     if settings_doc:
-        integration_keys = settings_doc.get("integration_keys", {})
-        for key, value in integration_keys.items():
+        # LLM provider / model
+        if settings_doc.get("llm_provider"):
+            env["LLM_PROVIDER"] = settings_doc["llm_provider"]
+        if settings_doc.get("llm_model"):
+            env["LLM_MODEL"] = settings_doc["llm_model"]
+
+        # LLM API keys (map provider name → env var name)
+        from agent_platform.api.routes.team_settings import LLM_PROVIDER_TO_ENV_KEY
+        api_keys = settings_doc.get("api_keys", {})
+        for provider_name, env_var in LLM_PROVIDER_TO_ENV_KEY.items():
+            key_val = api_keys.get(provider_name, "")
+            if key_val:
+                env[env_var] = key_val
+
+        # Voice provider
+        if settings_doc.get("voice_provider"):
+            env["VOICE_API_PROVIDER"] = settings_doc["voice_provider"]
+
+        # Integration keys (VOICE_API_KEY, GOOGLE_MAPS_API_KEY, etc.)
+        for key, value in settings_doc.get("integration_keys", {}).items():
             if key and value:
                 env[key] = value
-                logger.debug("Injected integration key %s from settings", key)
 
-    # Load the team's own .env file if it exists (overrides DB values)
-    team_env_path = root_dir / ".env"
-    if team_env_path.exists():
-        logger.info("Loading team .env from %s", team_env_path)
-        for line in team_env_path.read_text().splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                key, _, value = stripped.partition("=")
-                key = key.strip()
-                value = value.strip()
-                if key and value and value != "PLATFORM_MANAGED":
-                    env[key] = value
+    # MONGODB_URI from platform environment (infrastructure)
+    if "MONGODB_URI" not in env:
+        env["MONGODB_URI"] = "mongodb://localhost:27017"
 
     timeout = agent.get("timeout_seconds", settings.DEFAULT_TIMEOUT_SECONDS)
 
