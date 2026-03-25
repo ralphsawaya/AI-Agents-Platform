@@ -250,7 +250,8 @@ Tabbed interface with standard tabs for all teams, plus optional custom tabs per
 - **Files** — read-only source file browser with syntax highlighting (excludes `.venv`, caches, and build artifacts)
 - **Runs** — paginated run history (15 per page, last 100 runs) with inline log viewer and live WebSocket tail
 - **Schedules** — create/edit/delete cron, interval, or one-time schedules
-- **Custom Tabs** — team-specific tabs loaded as plugins from `ui/tabs/` in the team package (e.g. the trading team ships Trading, Trades, Signals, and Strategy tabs with LLM provider selection, risk parameters, and trading settings persisted to MongoDB)
+- **Settings** — LLM provider/model selection and API key management for the team, persisted to MongoDB (`team_settings` collection). Supported providers: Google Gemini (default), Anthropic Claude, DeepSeek, Groq, and OpenAI. API keys can be toggled between masked and visible using the eye icon. For trading teams, also includes the trading kill switch, risk defaults, and indicator period configuration. All teams share the same LLM selection UI; each team's settings are stored independently by agent ID. This tab is built-in and appears automatically for every agent team — no configuration needed.
+- **Custom Tabs** — team-specific tabs loaded as plugins from `ui/tabs/` in the team package (e.g. the trading team ships Trading, Trades, Signals, and Strategy tabs with live dashboard data)
 - **Danger Zone** — rebuild virtual environment (re-install dependencies) and permanent deletion with confirmation
 
 ### Monitor
@@ -396,6 +397,7 @@ All settings are in `agent_platform/config.py` and overridable via `.env`:
 | `FAILURE_ALERT_THRESHOLD` | `3` | Consecutive failures before alert |
 | `LOG_RETENTION_DAYS` | `30` | TTL for run log documents |
 | `PORT` | `8000` | Server port |
+| `GEMINI_API_KEY` | *(empty)* | For agent teams using Google Gemini (default LLM) |
 | `GROQ_API_KEY` | *(empty)* | Forwarded to all agent subprocesses |
 | `ANTHROPIC_API_KEY` | *(empty)* | For agent teams using Claude |
 | `BINANCE_API_KEY` | *(empty)* | For the trading agents team |
