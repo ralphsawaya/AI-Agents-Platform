@@ -8,7 +8,7 @@
 <div class="page-header">
     <h1 id="agent-name">Loading…</h1>
     <div class="flex gap-sm">
-        <button class="btn btn-primary" onclick="openModal('run-modal')">Run Now</button>
+        <button class="btn btn-primary" onclick="openRunModal()">Run Now</button>
         <a href="/" class="btn btn-outline">Back</a>
     </div>
 </div>
@@ -418,12 +418,16 @@ let _formBuilt = false;
 let _editingSchedId = null;
 let _settingsInited = false;
 
+let _acData = {};
+let _acSelections = {};
+
 function buildRunForm(runConfig) {
     const modal = document.getElementById('run-modal');
-    // Skip only if the form was already built AND the modal is open (user may be typing)
     if (_formBuilt && modal && modal.classList.contains('active')) return;
 
     _formBuilt = true;
+    _acData = {};
+    _acSelections = {};
     const body = document.getElementById('run-form-body');
     if (!runConfig || !runConfig.fields || !runConfig.fields.length) {
         body.innerHTML = `<div class="form-group">
@@ -436,7 +440,9 @@ function buildRunForm(runConfig) {
     _runConfig = runConfig;
     let html = '';
     for (const field of runConfig.fields) {
-        html += `<div class="form-group">`;
+        const visAttr = field.visible_when
+            ? ` data-visible-when='${JSON.stringify(field.visible_when)}'` : '';
+        html += `<div class="form-group" id="run-group-${field.name}"${visAttr}>`;
         html += `<label>${field.label || field.name}`;
         if (field.max_words) html += ` <span id="wc-${field.name}" class="text-dim text-sm" style="margin-left:.5rem">0 / ${field.max_words} words</span>`;
         html += `</label>`;
@@ -454,12 +460,183 @@ function buildRunForm(runConfig) {
             html += `</select>`;
         } else if (field.type === 'number') {
             html += `<input type="number" id="run-field-${field.name}" placeholder="${field.placeholder || ''}" ${field.required ? 'required' : ''}>`;
+        } else if (field.type === 'leads_select') {
+            html += `<div class="ac-wrapper" id="ac-wrap-${field.name}">`;
+            html += `<div class="ac-chips" id="ac-chips-${field.name}"></div>`;
+            html += `<input type="text" class="ac-input" id="ac-input-${field.name}"
+                placeholder="${field.placeholder || 'Search leads...'}" autocomplete="off">`;
+            html += `<div class="ac-dropdown" id="ac-dd-${field.name}"></div>`;
+            html += `</div>`;
         } else {
             html += `<input type="text" id="run-field-${field.name}" placeholder="${field.placeholder || ''}" ${field.required ? 'required' : ''}>`;
         }
         html += `</div>`;
     }
     body.innerHTML = html;
+    _initRunFormFields(runConfig);
+}
+
+async function _initRunFormFields(runConfig) {
+    const modeEl = document.getElementById('run-field-mode');
+    if (modeEl) {
+        modeEl.addEventListener('change', _toggleModeFields);
+        _toggleModeFields();
+    }
+
+    for (const field of runConfig.fields) {
+        if (field.type === 'leads_select' && field.data_source) {
+            _acSelections[field.name] = new Set();
+            _acData[field.name] = [];
+            _attachLeadsListeners(field.name);
+            try {
+                const res = await API.get(field.data_source);
+                if (res.success) _acData[field.name] = res.data.leads || [];
+            } catch (e) {
+                console.warn('Failed to load leads for', field.name, e);
+            }
+        }
+    }
+}
+
+function _toggleModeFields() {
+    document.querySelectorAll('#run-form-body .form-group[data-visible-when]').forEach(grp => {
+        const cond = JSON.parse(grp.dataset.visibleWhen);
+        let show = true;
+        for (const [fName, allowed] of Object.entries(cond)) {
+            const el = document.getElementById(`run-field-${fName}`);
+            if (el && !allowed.includes(el.value)) { show = false; break; }
+        }
+        grp.style.display = show ? '' : 'none';
+    });
+}
+
+function _attachLeadsListeners(fieldName) {
+    const input = document.getElementById(`ac-input-${fieldName}`);
+    if (!input) return;
+    input.addEventListener('focus', () => _renderLeadsDropdown(fieldName, input.value));
+    input.addEventListener('input', () => _renderLeadsDropdown(fieldName, input.value));
+}
+
+function _renderLeadsDropdown(fieldName, filter) {
+    const dd = document.getElementById(`ac-dd-${fieldName}`);
+    const leads = _acData[fieldName] || [];
+    const f = (filter || '').toLowerCase();
+    const filtered = f ? leads.filter(l =>
+        (l.business_name || '').toLowerCase().includes(f) ||
+        (l.city || '').toLowerCase().includes(f) ||
+        (l.category || '').toLowerCase().includes(f)
+    ) : leads;
+
+    const allChecked = leads.length > 0 && _acSelections[fieldName].size === leads.length;
+    let html = '';
+
+    if (leads.length) {
+        html += `<div class="ac-option ac-select-all" id="ac-all-${fieldName}">
+            <input type="checkbox" ${allChecked ? 'checked' : ''} tabindex="-1">
+            <strong>Select All (${leads.length})</strong></div>`;
+    }
+
+    if (!filtered.length) {
+        html += '<div class="ac-no-results">No matching leads</div>';
+    } else {
+        for (const l of filtered) {
+            const sel = _acSelections[fieldName].has(l._id);
+            html += `<div class="ac-option${sel ? ' selected' : ''}" data-val="${l._id}">
+                <input type="checkbox" ${sel ? 'checked' : ''} tabindex="-1">
+                <span><strong>${l.business_name || '—'}</strong>
+                <span class="text-dim" style="font-size:.75rem"> · ${l.city || ''} · ${l.category || ''}</span></span></div>`;
+        }
+    }
+
+    dd.innerHTML = html;
+    dd.style.display = 'block';
+
+    const allBtn = document.getElementById(`ac-all-${fieldName}`);
+    if (allBtn) {
+        allBtn.addEventListener('click', () => {
+            if (_acSelections[fieldName].size === leads.length) {
+                _acSelections[fieldName].clear();
+            } else {
+                _acSelections[fieldName] = new Set(leads.map(l => l._id));
+            }
+            _renderLeadsDropdown(fieldName, document.getElementById(`ac-input-${fieldName}`)?.value || '');
+            _renderLeadChips(fieldName);
+        });
+    }
+
+    dd.querySelectorAll('.ac-option:not(.ac-select-all)').forEach(opt => {
+        opt.addEventListener('click', () => {
+            const v = opt.dataset.val;
+            _acSelections[fieldName].has(v)
+                ? _acSelections[fieldName].delete(v)
+                : _acSelections[fieldName].add(v);
+            _renderLeadsDropdown(fieldName, document.getElementById(`ac-input-${fieldName}`)?.value || '');
+            _renderLeadChips(fieldName);
+        });
+    });
+}
+
+function _renderLeadChips(fieldName) {
+    const el = document.getElementById(`ac-chips-${fieldName}`);
+    if (!el) return;
+    const sel = _acSelections[fieldName];
+    const leads = _acData[fieldName] || [];
+    if (!sel || !sel.size) { el.innerHTML = ''; return; }
+
+    if (sel.size === leads.length && leads.length > 0) {
+        el.innerHTML = `<span class="ac-chip">All ${leads.length} leads selected
+            <span class="ac-chip-x" data-f="${fieldName}" data-v="__all__">&times;</span></span>`;
+        el.querySelector('.ac-chip-x').addEventListener('click', e => {
+            e.stopPropagation();
+            _acSelections[fieldName].clear();
+            _renderLeadChips(fieldName);
+            const ddEl = document.getElementById(`ac-dd-${fieldName}`);
+            if (ddEl && ddEl.style.display !== 'none') {
+                _renderLeadsDropdown(fieldName, document.getElementById(`ac-input-${fieldName}`)?.value || '');
+            }
+        });
+        return;
+    }
+
+    let chips = [];
+    let count = 0;
+    for (const id of sel) {
+        const lead = leads.find(l => l._id === id);
+        if (count < 5) {
+            chips.push(`<span class="ac-chip">${lead?.business_name || id}
+                <span class="ac-chip-x" data-f="${fieldName}" data-v="${id}">&times;</span></span>`);
+        }
+        count++;
+    }
+    if (count > 5) chips.push(`<span class="ac-chip">+${count - 5} more</span>`);
+    el.innerHTML = chips.join('');
+
+    el.querySelectorAll('.ac-chip-x').forEach(x => {
+        x.addEventListener('click', e => {
+            e.stopPropagation();
+            _acSelections[x.dataset.f].delete(x.dataset.v);
+            _renderLeadChips(x.dataset.f);
+            const ddEl = document.getElementById(`ac-dd-${x.dataset.f}`);
+            if (ddEl && ddEl.style.display !== 'none') {
+                _renderLeadsDropdown(x.dataset.f, document.getElementById(`ac-input-${x.dataset.f}`)?.value || '');
+            }
+        });
+    });
+}
+
+document.addEventListener('click', e => {
+    document.querySelectorAll('.ac-wrapper').forEach(w => {
+        if (!w.contains(e.target)) {
+            const dd = w.querySelector('.ac-dropdown');
+            if (dd) dd.style.display = 'none';
+        }
+    });
+});
+
+function openRunModal() {
+    _formBuilt = false;
+    buildRunForm(_runConfig || null);
+    openModal('run-modal');
 }
 
 function updateWordCount(name, maxWords) {
@@ -716,6 +893,20 @@ async function runAgent() {
 
     if (_runConfig && _runConfig.fields && _runConfig.fields.length) {
         for (const field of _runConfig.fields) {
+            const group = document.getElementById(`run-group-${field.name}`);
+            if (group && group.style.display === 'none') continue;
+
+            if (field.type === 'leads_select') {
+                const sel = _acSelections[field.name];
+                const leads = _acData[field.name] || [];
+                if (sel && sel.size === leads.length && leads.length > 0) {
+                    args[field.name] = 'all';
+                } else {
+                    args[field.name] = sel ? [...sel] : [];
+                }
+                continue;
+            }
+
             const el = document.getElementById(`run-field-${field.name}`);
             if (!el) continue;
             const val = el.value.trim();
@@ -740,6 +931,7 @@ async function runAgent() {
     if (res.success) {
         toast('Agent started', 'success');
         closeModal('run-modal');
+        _formBuilt = false;
         loadRuns(1, true);
         loadAgent();
     } else {
@@ -793,10 +985,30 @@ function openSchedModal(editId = null) {
         document.getElementById('sched-cron').value = '';
         document.getElementById('sched-interval').value = '3600';
         document.getElementById('sched-runat').value = '';
-        document.getElementById('sched-args').value = '{}';
+        document.getElementById('sched-args').value = _buildScheduleSample();
         toggleSchedFields();
     }
     openModal('schedule-modal');
+}
+
+function _buildScheduleSample() {
+    if (!_runConfig || !_runConfig.fields || !_runConfig.fields.length) return '{}';
+    const sample = {};
+    for (const field of _runConfig.fields) {
+        if (field.type === 'leads_select') continue;
+        if (field.visible_when) {
+            const modeAllowed = field.visible_when.mode;
+            if (modeAllowed && !modeAllowed.includes(sample.mode || _runConfig.fields[0]?.options?.[0] || '')) continue;
+        }
+        if (field.type === 'select' && field.options) {
+            sample[field.name] = field.options[0]?.value || field.options[0] || '';
+        } else if (field.type === 'number') {
+            sample[field.name] = field.placeholder ? Number(field.placeholder) : 0;
+        } else {
+            sample[field.name] = field.placeholder || '';
+        }
+    }
+    return JSON.stringify(sample, null, 4);
 }
 
 async function editSched(id) {

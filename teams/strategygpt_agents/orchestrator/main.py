@@ -80,11 +80,13 @@ def run_sourcing(args: dict):
 def run_outreach(args: dict):
     """Run the outreach pipeline: Voice Caller."""
     batch_size = int(args.get("batch_size", CALLS_PER_BATCH))
+    lead_ids = args.get("lead_ids", "all")
 
-    logger.info("Starting outreach pipeline — batch_size=%d", batch_size)
+    logger.info("Starting outreach pipeline — batch_size=%d, lead_ids=%s", batch_size, lead_ids)
 
     graph = build_outreach_graph()
     result = graph.invoke({
+        "lead_ids": lead_ids,
         "batch_size": batch_size,
         "leads_to_call": [],
         "call_results": [],

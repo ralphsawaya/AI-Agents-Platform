@@ -12,21 +12,33 @@
             "label": "Target City (e.g. Miami, FL)",
             "type": "text",
             "placeholder": "Austin, TX",
-            "required": false
+            "required": false,
+            "visible_when": {"mode": ["full", "sourcing"]}
         },
         {
             "name": "categories",
             "label": "Business Categories (comma-separated)",
             "type": "text",
             "placeholder": "restaurant, plumber, dentist, salon",
-            "required": false
+            "required": false,
+            "visible_when": {"mode": ["full", "sourcing"]}
         },
         {
             "name": "max_leads",
             "label": "Max Leads per Run",
             "type": "number",
             "placeholder": "50",
-            "required": false
+            "required": false,
+            "visible_when": {"mode": ["full", "sourcing"]}
+        },
+        {
+            "name": "lead_ids",
+            "label": "Select Leads to Contact",
+            "type": "leads_select",
+            "data_source": "/api/strategygpt/leads?status=qualified&limit=500",
+            "placeholder": "Search qualified leads...",
+            "required": false,
+            "visible_when": {"mode": ["outreach"]}
         }
     ]
 }

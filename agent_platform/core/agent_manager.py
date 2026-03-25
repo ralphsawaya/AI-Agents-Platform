@@ -380,12 +380,13 @@ async def register_agent(
 async def get_agent(agent_id: str) -> dict[str, Any] | None:
     agent_repo = AgentRepository(get_database())
     agent = await agent_repo.get_by_id(agent_id)
-    if agent and "run_config" not in agent:
+    if agent:
         root_dir = Path(agent.get("upload_path", "")) / agent.get("root_folder", "")
         run_config = _parse_run_config(root_dir)
         if run_config:
             agent["run_config"] = run_config
-            await agent_repo.update(agent_id, {"run_config": run_config})
+            if agent.get("_run_config_hash") != str(run_config):
+                await agent_repo.update(agent_id, {"run_config": run_config, "_run_config_hash": str(run_config)})
     return agent
 
 

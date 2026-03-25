@@ -19,6 +19,7 @@ class SourcingPipelineState(TypedDict):
 
 
 class OutreachPipelineState(TypedDict):
+    lead_ids: list[str] | str
     batch_size: int
     leads_to_call: list[dict]
     call_results: list[dict]
@@ -35,6 +36,7 @@ class FullPipelineState(TypedDict):
     min_reviews: int
     min_rating: float
     max_leads: int
+    lead_ids: list[str] | str
     batch_size: int
     raw_places: list[dict]
     filtered_leads: list[dict]

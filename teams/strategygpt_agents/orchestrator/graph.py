@@ -70,6 +70,7 @@ def run_voice_caller(state: dict) -> dict:
     logger.info("Orchestrator: running Voice Caller")
     graph = build_voice_caller_graph()
     result = graph.invoke({
+        "lead_ids": state.get("lead_ids", "all"),
         "batch_size": state.get("batch_size", 20),
         "leads_to_call": [],
         "call_results": [],

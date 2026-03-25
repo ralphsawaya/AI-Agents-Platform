@@ -8,9 +8,16 @@ logger = get_logger("voice_caller.fetch_qualified_leads")
 
 def fetch_qualified_leads(state: dict) -> dict:
     batch_size = state.get("batch_size", 20)
+    lead_ids = state.get("lead_ids", "all")
     col = get_leads_collection()
 
-    cursor = col.find({"status": "qualified"}).limit(batch_size)
+    query: dict = {"status": "qualified"}
+    if lead_ids and lead_ids != "all":
+        from bson import ObjectId
+        query["_id"] = {"$in": [ObjectId(lid) for lid in lead_ids]}
+        logger.info("Filtering to %d specific lead(s)", len(lead_ids))
+
+    cursor = col.find(query).limit(batch_size)
     leads = list(cursor)
 
     logger.info("Fetched %d qualified leads for calling", len(leads))

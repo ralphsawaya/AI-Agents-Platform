@@ -4,6 +4,7 @@ from typing import TypedDict
 
 
 class VoiceCallerState(TypedDict):
+    lead_ids: list[str] | str
     batch_size: int
     leads_to_call: list[dict]
     call_results: list[dict]
