@@ -542,8 +542,14 @@ async function loadFile(path) {
     }
 }
 
-async function loadRuns(page) {
-    currentRunsPage = page || 1;
+async function loadRuns(page, force) {
+    currentRunsPage = page || currentRunsPage || 1;
+
+    if (_openLogRunId && !force) {
+        _updateOpenRunStatus();
+        return;
+    }
+
     const res = await API.get(`/api/agents/${AGENT_ID}/runs?page=${currentRunsPage}&page_size=15`);
     if (!res.success) return;
     const {runs, total, page_size} = res.data;
@@ -554,6 +560,9 @@ async function loadRuns(page) {
         document.getElementById('runs-table').innerHTML = '<p class="text-dim">No runs yet.</p>';
         return;
     }
+
+    _openLogRunId = null;
+
     document.getElementById('runs-table').innerHTML = `<table>
         <thead><tr><th>Run ID</th><th>Status</th><th>Triggered</th><th>Duration</th><th>Started</th><th></th></tr></thead>
         <tbody>${runs.map(r => `
@@ -573,9 +582,26 @@ async function loadRuns(page) {
 
     let pag = '';
     for (let i = 1; i <= totalPages; i++) {
-        pag += `<button class="${i === currentRunsPage ? 'active' : ''}" onclick="loadRuns(${i})">${i}</button>`;
+        pag += `<button class="${i === currentRunsPage ? 'active' : ''}" onclick="loadRuns(${i}, true)">${i}</button>`;
     }
     document.getElementById('runs-pagination').innerHTML = pag;
+}
+
+async function _updateOpenRunStatus() {
+    if (!_openLogRunId) return;
+    const row = document.getElementById(`run-row-${_openLogRunId}`);
+    if (!row) return;
+    const res = await API.get(`/api/runs/${_openLogRunId}`);
+    if (!res.success) return;
+    const r = res.data;
+    const cells = row.children;
+    if (cells[1]) cells[1].innerHTML = statusBadge(r.status);
+    if (cells[3]) cells[3].textContent = fmtDuration(r.duration_seconds);
+    if (r.status !== 'running') {
+        const btnCell = cells[cells.length - 1];
+        const stopBtn = btnCell.querySelector('.btn-danger');
+        if (stopBtn) stopBtn.remove();
+    }
 }
 
 let _openLogRunId = null;
@@ -616,7 +642,7 @@ async function viewLog(runId) {
 async function stopRun(runId) {
     const res = await API.post(`/api/runs/${runId}/stop`);
     toast(res.success ? 'Run stopped' : res.error, res.success ? 'success' : 'error');
-    loadRuns(currentRunsPage);
+    loadRuns(currentRunsPage, true);
     loadAgent();
 }
 
@@ -649,7 +675,7 @@ async function runAgent() {
     if (res.success) {
         toast('Agent started', 'success');
         closeModal('run-modal');
-        loadRuns(1);
+        loadRuns(1, true);
         loadAgent();
     } else {
         toast(res.error, 'error');
