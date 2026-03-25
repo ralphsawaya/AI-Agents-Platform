@@ -1,0 +1,186 @@
+<style>
+/* ── Stat cards ── */
+.sg-stats { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; margin-bottom:22px; }
+.sg-stat { padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:10px; }
+.sg-stat .lbl { font-size:0.7rem; font-weight:500; text-transform:uppercase; letter-spacing:0.04em; color:#777; margin-bottom:6px; }
+.sg-stat .val { font-size:1.15rem; font-weight:700; }
+.sg-stat .sub { font-size:0.72rem; color:#666; margin-top:3px; }
+
+/* ── Funnel ── */
+.sg-funnel { display:flex; align-items:center; gap:0; margin-bottom:22px; }
+.sg-funnel-step { flex:1; text-align:center; padding:14px 8px; position:relative; }
+.sg-funnel-step .f-count { font-size:1.3rem; font-weight:700; }
+.sg-funnel-step .f-label { font-size:0.72rem; color:#888; margin-top:4px; text-transform:uppercase; letter-spacing:0.03em; }
+.sg-funnel-step .f-bar { height:6px; border-radius:3px; margin-top:8px; }
+.sg-funnel-arrow { color:#555; font-size:1.1rem; flex-shrink:0; padding:0 2px; }
+
+/* ── Cards row ── */
+.sg-cards-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:22px; }
+.sg-card { padding:18px; background:var(--surface); border:1px solid var(--border); border-radius:10px; }
+.sg-card-title { font-size:0.88rem; font-weight:700; margin-bottom:14px; }
+
+/* ── Breakdown list ── */
+.sg-breakdown { list-style:none; padding:0; margin:0; }
+.sg-breakdown li { display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid var(--border); font-size:0.84rem; }
+.sg-breakdown li:last-child { border-bottom:none; }
+.sg-breakdown .bar-wrap { width:50%; height:8px; background:var(--surface-2,#1a1a2e); border-radius:4px; overflow:hidden; margin-left:12px; }
+.sg-breakdown .bar-fill { height:100%; border-radius:4px; }
+
+/* ── Status badge ── */
+.sg-status { display:inline-block; padding:3px 10px; border-radius:10px; font-size:0.72rem; font-weight:600; }
+.sg-status-interested { background:#1a3a2a; color:#4ade80; }
+.sg-status-not_interested { background:#3a1a1a; color:#f87171; }
+.sg-status-qualified { background:#1a2a3a; color:#60a5fa; }
+.sg-status-new { background:#2a2a2a; color:#a1a1aa; }
+.sg-status-invalid { background:#2a1a1a; color:#fb923c; }
+.sg-status-voicemail { background:#3a2a1a; color:#fbbf24; }
+.sg-status-callback_requested { background:#2a1a3a; color:#c084fc; }
+.sg-status-no_answer { background:#1a1a2a; color:#94a3b8; }
+
+.text-dim { color:#777; }
+.text-green { color:#4ade80; }
+</style>
+
+<!-- ============ Stat Cards ============ -->
+<div class="sg-stats" id="sg-stats">
+    <div class="sg-stat"><div class="lbl">Total Leads</div><div class="val text-dim">--</div></div>
+    <div class="sg-stat"><div class="lbl">Qualified</div><div class="val text-dim">--</div></div>
+    <div class="sg-stat"><div class="lbl">Called</div><div class="val text-dim">--</div></div>
+    <div class="sg-stat"><div class="lbl">Interested</div><div class="val text-dim">--</div></div>
+    <div class="sg-stat"><div class="lbl">Conversion</div><div class="val text-dim">--</div></div>
+</div>
+
+<!-- ============ Funnel ============ -->
+<div class="sg-card" style="margin-bottom:22px;">
+    <div class="sg-card-title">Conversion Funnel</div>
+    <div class="sg-funnel" id="sg-funnel">
+        <p class="text-dim" style="font-size:0.86rem;">Run the pipeline to see funnel data.</p>
+    </div>
+</div>
+
+<!-- ============ Breakdown cards ============ -->
+<div class="sg-cards-row">
+    <div class="sg-card">
+        <div class="sg-card-title">Leads by City</div>
+        <ul class="sg-breakdown" id="sg-cities">
+            <li class="text-dim">No city data yet.</li>
+        </ul>
+    </div>
+    <div class="sg-card">
+        <div class="sg-card-title">Leads by Category</div>
+        <ul class="sg-breakdown" id="sg-categories">
+            <li class="text-dim">No category data yet.</li>
+        </ul>
+    </div>
+</div>
+
+<!-- ============ Status breakdown ============ -->
+<div class="sg-card">
+    <div class="sg-card-title">Status Breakdown</div>
+    <div id="sg-status-breakdown">
+        <p class="text-dim" style="font-size:0.86rem;">No lead data available.</p>
+    </div>
+</div>
+
+<script>
+(function() {
+    const STATUS_ORDER = ['new','qualified','interested','not_interested','voicemail','callback_requested','no_answer','invalid'];
+    const STATUS_COLORS = {
+        new:'#a1a1aa', qualified:'#60a5fa', interested:'#4ade80', not_interested:'#f87171',
+        voicemail:'#fbbf24', callback_requested:'#c084fc', no_answer:'#94a3b8', invalid:'#fb923c'
+    };
+
+    function fmtLabel(s) {
+        if (!s) return '—';
+        return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+
+    async function loadDashboard() {
+        const res = await API.get('/api/strategygpt/summary');
+        if (!res.success || !res.data) return;
+        const d = res.data;
+
+        // Stat cards
+        document.getElementById('sg-stats').innerHTML = `
+            <div class="sg-stat">
+                <div class="lbl">Total Leads</div>
+                <div class="val">${d.total_leads}</div>
+                <div class="sub">${d.new} new · ${d.invalid} invalid</div>
+            </div>
+            <div class="sg-stat">
+                <div class="lbl">Qualified</div>
+                <div class="val">${d.qualified + d.called}</div>
+                <div class="sub">${d.qualification_rate}% of total</div>
+            </div>
+            <div class="sg-stat">
+                <div class="lbl">Called</div>
+                <div class="val">${d.called}</div>
+                <div class="sub">${d.total_calls} total calls</div>
+            </div>
+            <div class="sg-stat">
+                <div class="lbl">Interested</div>
+                <div class="val text-green">${d.interested}</div>
+                <div class="sub">${d.not_interested} declined</div>
+            </div>
+            <div class="sg-stat">
+                <div class="lbl">Conversion</div>
+                <div class="val text-green">${d.conversion_rate}%</div>
+                <div class="sub">avg call ${d.avg_call_duration}s</div>
+            </div>
+        `;
+
+        // Funnel
+        const funnel = [
+            { label:'Sourced', count:d.total_leads, color:'#a1a1aa' },
+            { label:'Qualified', count:d.qualified + d.called, color:'#60a5fa' },
+            { label:'Called', count:d.called, color:'#fbbf24' },
+            { label:'Interested', count:d.interested, color:'#4ade80' },
+        ];
+        const maxF = Math.max(1, funnel[0].count);
+        let funnelHtml = '';
+        funnel.forEach((step, i) => {
+            const pct = Math.max(5, (step.count / maxF) * 100);
+            funnelHtml += `<div class="sg-funnel-step">
+                <div class="f-count" style="color:${step.color}">${step.count}</div>
+                <div class="f-label">${step.label}</div>
+                <div class="f-bar" style="background:${step.color}22;"><div style="width:${pct}%;height:100%;background:${step.color};border-radius:3px;"></div></div>
+            </div>`;
+            if (i < funnel.length - 1) funnelHtml += `<div class="sg-funnel-arrow">→</div>`;
+        });
+        document.getElementById('sg-funnel').innerHTML = funnelHtml;
+
+        // Cities
+        if (d.cities && d.cities.length) {
+            const maxC = d.cities[0].count;
+            document.getElementById('sg-cities').innerHTML = d.cities.map(c =>
+                `<li><span>${c.city}</span><span style="display:flex;align-items:center;gap:8px;"><span class="bar-wrap"><span class="bar-fill" style="width:${(c.count/maxC*100).toFixed(0)}%;background:#60a5fa;"></span></span><strong>${c.count}</strong></span></li>`
+            ).join('');
+        }
+
+        // Categories
+        if (d.categories && d.categories.length) {
+            const maxCat = d.categories[0].count;
+            document.getElementById('sg-categories').innerHTML = d.categories.map(c =>
+                `<li><span>${fmtLabel(c.category)}</span><span style="display:flex;align-items:center;gap:8px;"><span class="bar-wrap"><span class="bar-fill" style="width:${(c.count/maxCat*100).toFixed(0)}%;background:#c084fc;"></span></span><strong>${c.count}</strong></span></li>`
+            ).join('');
+        }
+
+        // Status breakdown
+        const sc = d.status_counts || {};
+        const total = d.total_leads || 1;
+        let sbHtml = '<div style="display:flex;flex-wrap:wrap;gap:10px;">';
+        STATUS_ORDER.forEach(s => {
+            const count = sc[s] || 0;
+            if (count > 0) {
+                const pct = (count / total * 100).toFixed(1);
+                sbHtml += `<div class="sg-status sg-status-${s}">${fmtLabel(s)}: ${count} (${pct}%)</div>`;
+            }
+        });
+        sbHtml += '</div>';
+        document.getElementById('sg-status-breakdown').innerHTML = sbHtml || '<p class="text-dim">No leads yet.</p>';
+    }
+
+    loadDashboard();
+    window._sg_dashInterval = setInterval(loadDashboard, 20000);
+})();
+</script>

@@ -1,0 +1,130 @@
+<style>
+.sg-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+.sg-filter { padding:6px 12px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:inherit; font-size:0.82rem; cursor:pointer; }
+.sg-filter:hover { border-color:var(--primary); }
+.sg-filter.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+
+.sg-pager { display:flex; align-items:center; justify-content:space-between; margin-top:14px; font-size:0.82rem; }
+.sg-pager button { padding:5px 14px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:inherit; cursor:pointer; font-size:0.8rem; }
+.sg-pager button:disabled { opacity:0.35; cursor:default; }
+.sg-pager button:not(:disabled):hover { border-color:var(--primary); }
+
+.sg-status { display:inline-block; padding:3px 10px; border-radius:10px; font-size:0.72rem; font-weight:600; }
+.sg-status-interested { background:#1a3a2a; color:#4ade80; }
+.sg-status-not_interested { background:#3a1a1a; color:#f87171; }
+.sg-status-qualified { background:#1a2a3a; color:#60a5fa; }
+.sg-status-new { background:#2a2a2a; color:#a1a1aa; }
+.sg-status-invalid { background:#2a1a1a; color:#fb923c; }
+.sg-status-voicemail { background:#3a2a1a; color:#fbbf24; }
+.sg-status-callback_requested { background:#2a1a3a; color:#c084fc; }
+.sg-status-no_answer { background:#1a1a2a; color:#94a3b8; }
+.sg-status-called { background:#1a2a2a; color:#2dd4bf; }
+
+.text-dim { color:#777; }
+</style>
+
+<h3 class="mb-1">Lead Database</h3>
+
+<!-- ============ Filter bar ============ -->
+<div class="sg-toolbar" id="sg-lead-filters">
+    <button class="sg-filter active" data-status="">All</button>
+    <button class="sg-filter" data-status="new">New</button>
+    <button class="sg-filter" data-status="qualified">Qualified</button>
+    <button class="sg-filter" data-status="interested">Interested</button>
+    <button class="sg-filter" data-status="not_interested">Not Interested</button>
+    <button class="sg-filter" data-status="voicemail">Voicemail</button>
+    <button class="sg-filter" data-status="callback_requested">Callback</button>
+    <button class="sg-filter" data-status="no_answer">No Answer</button>
+    <button class="sg-filter" data-status="invalid">Invalid</button>
+</div>
+
+<!-- ============ Table ============ -->
+<div id="sg-leads-table">
+    <p class="text-dim">No leads sourced yet. Run the sourcing pipeline to populate this table.</p>
+</div>
+
+<!-- ============ Pager ============ -->
+<div class="sg-pager" id="sg-leads-pager" style="display:none;">
+    <button id="sg-leads-prev" onclick="_sg_leadsPage(-1)">← Previous</button>
+    <span id="sg-leads-info"></span>
+    <button id="sg-leads-next" onclick="_sg_leadsPage(1)">Next →</button>
+</div>
+
+<script>
+(function() {
+    let currentPage = 1;
+    let currentStatus = '';
+    const PAGE_SIZE = 15;
+
+    function fmtLabel(s) {
+        if (!s) return '—';
+        return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+    function fmtTime(t) {
+        if (!t) return '—';
+        return new Date(t).toLocaleString();
+    }
+
+    async function loadLeads() {
+        let url = `/api/strategygpt/leads?page=${currentPage}&limit=${PAGE_SIZE}`;
+        if (currentStatus) url += `&status=${currentStatus}`;
+
+        const res = await API.get(url);
+        if (!res.success) return;
+        const d = res.data;
+
+        if (!d.leads || !d.leads.length) {
+            document.getElementById('sg-leads-table').innerHTML = '<p class="text-dim">No leads match this filter.</p>';
+            document.getElementById('sg-leads-pager').style.display = 'none';
+            return;
+        }
+
+        let html = `<table>
+            <thead><tr>
+                <th>Business</th><th>Phone</th><th>City</th><th>Category</th>
+                <th>Rating</th><th>Reviews</th><th>Status</th><th>Created</th>
+            </tr></thead><tbody>`;
+
+        for (const l of d.leads) {
+            html += `<tr>
+                <td><strong>${l.business_name || '—'}</strong></td>
+                <td class="text-dim">${l.phone || '—'}</td>
+                <td>${l.city || '—'}</td>
+                <td class="text-dim">${fmtLabel(l.category)}</td>
+                <td>${l.rating ? l.rating.toFixed(1) + '★' : '—'}</td>
+                <td>${l.review_count ?? '—'}</td>
+                <td><span class="sg-status sg-status-${l.status}">${fmtLabel(l.status)}</span></td>
+                <td class="text-dim">${fmtTime(l.created_at)}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        document.getElementById('sg-leads-table').innerHTML = html;
+
+        // Pager
+        const pager = document.getElementById('sg-leads-pager');
+        pager.style.display = 'flex';
+        document.getElementById('sg-leads-info').textContent = `Page ${d.page} of ${d.pages} (${d.total} leads)`;
+        document.getElementById('sg-leads-prev').disabled = d.page <= 1;
+        document.getElementById('sg-leads-next').disabled = d.page >= d.pages;
+    }
+
+    window._sg_leadsPage = function(delta) {
+        currentPage += delta;
+        if (currentPage < 1) currentPage = 1;
+        loadLeads();
+    };
+
+    // Filter buttons
+    document.querySelectorAll('#sg-lead-filters .sg-filter').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#sg-lead-filters .sg-filter').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentStatus = btn.dataset.status;
+            currentPage = 1;
+            loadLeads();
+        });
+    });
+
+    loadLeads();
+})();
+</script>

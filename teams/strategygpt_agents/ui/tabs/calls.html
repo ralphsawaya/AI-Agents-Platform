@@ -1,0 +1,167 @@
+<style>
+.sg-call-stats { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px; margin-bottom:20px; }
+.sg-call-stat { padding:12px 14px; background:var(--surface); border:1px solid var(--border); border-radius:10px; text-align:center; }
+.sg-call-stat .lbl { font-size:0.68rem; font-weight:500; text-transform:uppercase; letter-spacing:0.04em; color:#777; margin-bottom:4px; }
+.sg-call-stat .val { font-size:1.05rem; font-weight:700; }
+
+.sg-toolbar { display:flex; align-items:center; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+.sg-filter { padding:6px 12px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:inherit; font-size:0.82rem; cursor:pointer; }
+.sg-filter:hover { border-color:var(--primary); }
+.sg-filter.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+
+.sg-pager { display:flex; align-items:center; justify-content:space-between; margin-top:14px; font-size:0.82rem; }
+.sg-pager button { padding:5px 14px; border-radius:6px; border:1px solid var(--border); background:var(--surface); color:inherit; cursor:pointer; font-size:0.8rem; }
+.sg-pager button:disabled { opacity:0.35; cursor:default; }
+.sg-pager button:not(:disabled):hover { border-color:var(--primary); }
+
+.sg-outcome { display:inline-block; padding:3px 10px; border-radius:10px; font-size:0.72rem; font-weight:600; }
+.sg-outcome-interested { background:#1a3a2a; color:#4ade80; }
+.sg-outcome-not_interested { background:#3a1a1a; color:#f87171; }
+.sg-outcome-voicemail { background:#3a2a1a; color:#fbbf24; }
+.sg-outcome-callback_requested { background:#2a1a3a; color:#c084fc; }
+.sg-outcome-no_answer { background:#1a1a2a; color:#94a3b8; }
+
+.text-dim { color:#777; }
+</style>
+
+<h3 class="mb-1">Call Log</h3>
+
+<!-- ============ Outcome stats ============ -->
+<div class="sg-call-stats" id="sg-call-stats">
+    <div class="sg-call-stat"><div class="lbl">Total Calls</div><div class="val text-dim">--</div></div>
+</div>
+
+<!-- ============ Filter bar ============ -->
+<div class="sg-toolbar" id="sg-call-filters">
+    <button class="sg-filter active" data-outcome="">All</button>
+    <button class="sg-filter" data-outcome="interested">Interested</button>
+    <button class="sg-filter" data-outcome="not_interested">Not Interested</button>
+    <button class="sg-filter" data-outcome="voicemail">Voicemail</button>
+    <button class="sg-filter" data-outcome="callback_requested">Callback</button>
+    <button class="sg-filter" data-outcome="no_answer">No Answer</button>
+</div>
+
+<!-- ============ Table ============ -->
+<div id="sg-calls-table">
+    <p class="text-dim">No calls placed yet. Run the outreach pipeline to start calling.</p>
+</div>
+
+<!-- ============ Pager ============ -->
+<div class="sg-pager" id="sg-calls-pager" style="display:none;">
+    <button id="sg-calls-prev" onclick="_sg_callsPage(-1)">← Previous</button>
+    <span id="sg-calls-info"></span>
+    <button id="sg-calls-next" onclick="_sg_callsPage(1)">Next →</button>
+</div>
+
+<script>
+(function() {
+    let currentPage = 1;
+    let currentOutcome = '';
+    const PAGE_SIZE = 15;
+
+    const OUTCOME_COLORS = {
+        interested:'#4ade80', not_interested:'#f87171', voicemail:'#fbbf24',
+        callback_requested:'#c084fc', no_answer:'#94a3b8'
+    };
+
+    function fmtLabel(s) {
+        if (!s) return '—';
+        return s.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+    function fmtTime(t) {
+        if (!t) return '—';
+        return new Date(t).toLocaleString();
+    }
+    function fmtDuration(s) {
+        if (!s && s !== 0) return '—';
+        if (s < 60) return s.toFixed(0) + 's';
+        return Math.floor(s/60) + 'm ' + (s%60).toFixed(0) + 's';
+    }
+
+    // ── Outcome summary cards ──
+    async function loadCallStats() {
+        const res = await API.get('/api/strategygpt/call-stats');
+        if (!res.success || !res.data || !res.data.length) return;
+
+        let html = '';
+        let total = 0;
+        for (const s of res.data) total += s.count;
+
+        html += `<div class="sg-call-stat"><div class="lbl">Total Calls</div><div class="val">${total}</div></div>`;
+
+        for (const s of res.data) {
+            const color = OUTCOME_COLORS[s.outcome] || '#a1a1aa';
+            html += `<div class="sg-call-stat">
+                <div class="lbl">${fmtLabel(s.outcome)}</div>
+                <div class="val" style="color:${color}">${s.count}</div>
+            </div>`;
+        }
+        document.getElementById('sg-call-stats').innerHTML = html;
+    }
+
+    // ── Paginated call table ──
+    async function loadCalls() {
+        let url = `/api/strategygpt/calls?page=${currentPage}&limit=${PAGE_SIZE}`;
+        if (currentOutcome) url += `&outcome=${currentOutcome}`;
+
+        const res = await API.get(url);
+        if (!res.success) return;
+        const d = res.data;
+
+        if (!d.calls || !d.calls.length) {
+            document.getElementById('sg-calls-table').innerHTML = '<p class="text-dim">No calls match this filter.</p>';
+            document.getElementById('sg-calls-pager').style.display = 'none';
+            return;
+        }
+
+        let html = `<table>
+            <thead><tr>
+                <th>Time</th><th>Business</th><th>Phone</th>
+                <th>Outcome</th><th>Duration</th><th>Transcript</th>
+            </tr></thead><tbody>`;
+
+        for (const c of d.calls) {
+            const transcript = c.transcript_summary || '—';
+            const truncated = transcript.length > 80 ? transcript.slice(0, 80) + '…' : transcript;
+            html += `<tr>
+                <td class="text-dim">${fmtTime(c.called_at)}</td>
+                <td><strong>${c.business_name || '—'}</strong></td>
+                <td class="text-dim">${c.phone || '—'}</td>
+                <td><span class="sg-outcome sg-outcome-${c.outcome}">${fmtLabel(c.outcome)}</span></td>
+                <td>${fmtDuration(c.duration_seconds)}</td>
+                <td class="text-dim" style="max-width:200px;overflow:hidden;text-overflow:ellipsis;" title="${transcript}">${truncated}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        document.getElementById('sg-calls-table').innerHTML = html;
+
+        // Pager
+        const pager = document.getElementById('sg-calls-pager');
+        pager.style.display = 'flex';
+        document.getElementById('sg-calls-info').textContent = `Page ${d.page} of ${d.pages} (${d.total} calls)`;
+        document.getElementById('sg-calls-prev').disabled = d.page <= 1;
+        document.getElementById('sg-calls-next').disabled = d.page >= d.pages;
+    }
+
+    window._sg_callsPage = function(delta) {
+        currentPage += delta;
+        if (currentPage < 1) currentPage = 1;
+        loadCalls();
+    };
+
+    // Filter buttons
+    document.querySelectorAll('#sg-call-filters .sg-filter').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#sg-call-filters .sg-filter').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentOutcome = btn.dataset.outcome;
+            currentPage = 1;
+            loadCalls();
+        });
+    });
+
+    loadCallStats();
+    loadCalls();
+    window._sg_callsInterval = setInterval(() => { loadCallStats(); loadCalls(); }, 20000);
+})();
+</script>

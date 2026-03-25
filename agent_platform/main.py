@@ -87,6 +87,7 @@ from agent_platform.api.routes.webhook import router as webhook_router  # noqa: 
 from agent_platform.api.routes.trading import router as trading_router  # noqa: E402
 from agent_platform.api.routes.backtest import router as backtest_router  # noqa: E402
 from agent_platform.api.routes.team_settings import router as team_settings_router  # noqa: E402
+from agent_platform.api.routes.strategygpt import router as strategygpt_router  # noqa: E402
 
 app.include_router(agents_router)
 app.include_router(execution_router)
@@ -98,6 +99,7 @@ app.include_router(webhook_router)
 app.include_router(trading_router)
 app.include_router(backtest_router)
 app.include_router(team_settings_router)
+app.include_router(strategygpt_router)
 
 
 if __name__ == "__main__":
