@@ -264,24 +264,16 @@ except Exception as exc:
 
     env = {**os.environ}
 
-    # Load integration keys from Settings UI (stored in team_settings)
+    # All settings from MongoDB — no .env files
     settings_doc = await db["team_settings"].find_one({"_id": agent_id})
     if settings_doc:
-        for k, v in (settings_doc.get("integration_keys", {})).items():
+        if settings_doc.get("voice_provider"):
+            env["VOICE_API_PROVIDER"] = settings_doc["voice_provider"]
+        for k, v in settings_doc.get("integration_keys", {}).items():
             if k and v:
                 env[k] = v
-
-    # Load .env file (non-PLATFORM_MANAGED values override DB values)
-    env_file = os.path.join(team_dir, ".env")
-    if os.path.isfile(env_file):
-        with open(env_file) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    k, v = k.strip(), v.strip()
-                    if k and v and v != "PLATFORM_MANAGED":
-                        env[k] = v
+    if "MONGODB_URI" not in env:
+        env["MONGODB_URI"] = "mongodb://localhost:27017"
 
     try:
         proc = subprocess.run(
@@ -551,3 +543,11 @@ async def refresh_test_calls():
                 logger.warning("Failed to refresh test call %s: %s", call_id, exc)
 
     return _ok({"refreshed": refreshed})
+
+
+@router.delete("/test-calls")
+async def delete_all_test_calls():
+    """Remove every test call from the strategygpt_calls collection."""
+    db = get_database()
+    result = await db["strategygpt_calls"].delete_many({"is_test": True})
+    return _ok({"deleted": result.deleted_count})
