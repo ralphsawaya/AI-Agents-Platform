@@ -57,4 +57,4 @@ The pipeline returns a JSON object with:
 
 ## LLM
 
-Uses **Groq** (`llama-3.3-70b-versatile`) for both summarisation and title generation. Requires `GROQ_API_KEY` to be set in the platform environment.
+Uses **Google Gemini** (`gemini-2.5-flash`) by default for both summarisation and title generation. Also supports Anthropic Claude, DeepSeek, Groq, and OpenAI. The LLM provider and model can be configured from the **Settings** tab on the agent detail page (persisted to MongoDB), or via the `LLM_PROVIDER` / `LLM_MODEL` environment variables as fallback.

@@ -1,0 +1,6 @@
+name: agent_lead_qualifier
+role: lead_qualifier
+description: Enriches and validates leads from the sourcer, checks phone numbers, applies DNC filtering, and generates personalized call scripts via LLM
+model: llama-3.3-70b-versatile
+temperature: 0.3
+max_tokens: 2048

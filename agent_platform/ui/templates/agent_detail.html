@@ -20,6 +20,7 @@
     <div class="tab" data-tab="files">Files</div>
     <div class="tab" data-tab="runs">Runs</div>
     <div class="tab" data-tab="schedules">Schedules</div>
+    <div class="tab" data-tab="settings">Settings</div>
     <!-- custom tabs injected here by JS -->
     <div class="tab" data-tab="danger">Danger Zone</div>
 </div>
@@ -110,6 +111,121 @@
     <div id="schedules-table">Loading…</div>
 </div>
 
+<!-- Settings -->
+<div class="tab-content" id="tab-settings">
+    <style>
+    .ts-section { margin-bottom:24px; }
+    .ts-section-title { font-size:0.88rem;font-weight:700;margin-bottom:14px; }
+    .ts-bar { display:flex;align-items:center;gap:20px;flex-wrap:wrap;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:16px; }
+    .ts-bar .ts-bar-sep { width:1px;height:24px;background:var(--border); }
+    .ts-field { display:flex;align-items:center;gap:6px; }
+    .ts-field-label { font-size:0.76rem;font-weight:500;color:#777;white-space:nowrap; }
+    .ts-bar select,
+    .ts-bar input { padding:5px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:inherit;font-size:0.84rem; }
+    .ts-bar select { cursor:pointer; }
+    .ts-bar select:focus,
+    .ts-bar input:focus { outline:none;border-color:var(--primary); }
+    .ts-bar input[type="password"],
+    .ts-bar input[type="text"].ts-api-input { width:220px;font-family:monospace;font-size:0.8rem; }
+    .ts-eye-btn { display:inline-flex;align-items:center;justify-content:center;background:none;border:1px solid var(--border);border-radius:4px;padding:5px 7px;cursor:pointer;color:#888;line-height:1;transition:color 0.15s,border-color 0.15s; }
+    .ts-eye-btn:hover { color:#ccc;border-color:#666; }
+    .ts-eye-btn svg { display:block; }
+    .ts-save-row { display:flex;justify-content:flex-end;margin-top:16px; }
+    .ts-btn-save { background:var(--primary);color:#fff;border:none;padding:8px 24px;border-radius:6px;font-size:0.84rem;font-weight:600;cursor:pointer;transition:opacity 0.15s; }
+    .ts-btn-save:hover { opacity:0.88; }
+    .ts-btn-save:disabled { opacity:0.45;cursor:not-allowed; }
+    /* Trading-specific settings (conditionally shown) */
+    .ts-trading-section { display:none; }
+    .ts-toggle { display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none; }
+    .ts-toggle-track { position:relative;width:44px;height:24px;border-radius:12px;transition:background 0.25s; }
+    .ts-toggle-track.on  { background:#22c55e; }
+    .ts-toggle-track.off { background:#ef4444; }
+    .ts-toggle-thumb { position:absolute;top:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left 0.25s;box-shadow:0 1px 3px rgba(0,0,0,0.3); }
+    .ts-toggle-track.on  .ts-toggle-thumb { left:22px; }
+    .ts-toggle-track.off .ts-toggle-thumb { left:2px; }
+    .ts-toggle-label { font-size:0.82rem;font-weight:600; }
+    .ts-toggle-label.on  { color:#4ade80; }
+    .ts-toggle-label.off { color:#f87171; }
+    .ts-settings-grid { display:grid;grid-template-columns:1fr 1fr;gap:16px; }
+    .ts-panel { padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px; }
+    .ts-panel-title { font-size:0.85rem;font-weight:700;margin-bottom:12px; }
+    .ts-form-row { display:flex;align-items:center;gap:10px;margin-bottom:10px; }
+    .ts-form-row:last-child { margin-bottom:0; }
+    .ts-form-row label { flex:0 0 140px;font-size:0.8rem;color:#999; }
+    .ts-form-row input { flex:1;padding:6px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:inherit;font-size:0.85rem; }
+    .ts-form-row input:focus { outline:none;border-color:var(--primary); }
+    </style>
+
+    <!-- LLM Settings (all teams) -->
+    <div class="ts-section">
+        <div class="ts-section-title">LLM Configuration</div>
+        <div class="ts-bar">
+            <div class="ts-field">
+                <span class="ts-field-label">Provider</span>
+                <select id="ts-llm-provider" onchange="_ts_onProviderChange()">
+                    <option value="gemini">Google Gemini</option>
+                    <option value="claude">Anthropic Claude</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="groq">Groq</option>
+                    <option value="openai">OpenAI</option>
+                </select>
+            </div>
+            <div class="ts-field">
+                <span class="ts-field-label">Model</span>
+                <select id="ts-llm-model"></select>
+            </div>
+            <div class="ts-bar-sep"></div>
+            <div class="ts-field">
+                <span class="ts-field-label" id="ts-api-key-label">API Key</span>
+                <input type="password" id="ts-api-key" placeholder="Enter API key" autocomplete="off" />
+                <button type="button" class="ts-eye-btn" id="ts-eye-btn" onclick="_ts_toggleKeyVisibility()" title="Show key"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg></button>
+            </div>
+        </div>
+        <div class="ts-save-row">
+            <button class="ts-btn-save" id="ts-save-btn" onclick="_ts_saveSettings()">Save Settings</button>
+        </div>
+    </div>
+
+    <!-- Trading-specific settings (only visible for trading teams) -->
+    <div class="ts-trading-section" id="ts-trading-section">
+        <div class="ts-section">
+            <div class="ts-section-title">Trading Controls</div>
+            <div class="ts-bar">
+                <div class="ts-toggle" onclick="_ts_toggleKillSwitch()">
+                    <div class="ts-toggle-track off" id="ts-toggle-track">
+                        <div class="ts-toggle-thumb"></div>
+                    </div>
+                    <span class="ts-toggle-label off" id="ts-toggle-text">Loading…</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="ts-settings-grid">
+            <div class="ts-panel">
+                <div class="ts-panel-title">Risk Defaults</div>
+                <div class="ts-form-row"><label>Max Risk / Trade</label><input type="number" id="ts-max-risk" step="0.005" min="0.005" max="0.5" /></div>
+                <div class="ts-form-row"><label>Max Open Positions</label><input type="number" id="ts-max-positions" step="1" min="1" max="50" /></div>
+                <div class="ts-form-row"><label>Max Drawdown</label><input type="number" id="ts-max-drawdown" step="0.01" min="0.01" max="1.0" /></div>
+            </div>
+            <div class="ts-panel">
+                <div class="ts-panel-title">Indicator Periods</div>
+                <div class="ts-form-row"><label>ADX Period</label><input type="number" id="ts-adx" step="1" min="2" max="100" /></div>
+                <div class="ts-form-row"><label>ATR Period</label><input type="number" id="ts-atr" step="1" min="2" max="100" /></div>
+                <div class="ts-form-row"><label>BB Period</label><input type="number" id="ts-bb-period" step="1" min="2" max="100" /></div>
+                <div class="ts-form-row"><label>BB Std Dev</label><input type="number" id="ts-bb-std" step="0.1" min="0.5" max="5.0" /></div>
+                <div class="ts-form-row"><label>EMA Fast</label><input type="number" id="ts-ema-fast" step="1" min="2" max="200" /></div>
+                <div class="ts-form-row"><label>EMA Mid</label><input type="number" id="ts-ema-mid" step="1" min="2" max="200" /></div>
+                <div class="ts-form-row"><label>EMA Slow</label><input type="number" id="ts-ema-slow" step="1" min="2" max="200" /></div>
+                <div class="ts-form-row"><label>RSI Period</label><input type="number" id="ts-rsi" step="1" min="2" max="100" /></div>
+                <div class="ts-form-row"><label>Volume MA Period</label><input type="number" id="ts-vol-ma" step="1" min="2" max="100" /></div>
+            </div>
+        </div>
+        <div class="ts-save-row">
+            <button class="ts-btn-save" id="ts-trading-save-btn" onclick="_ts_saveTradingConfig()">Save Trading Settings</button>
+        </div>
+    </div>
+</div>
+
 <!-- Custom tab content panels are injected here dynamically by JS -->
 
 <!-- Danger Zone -->
@@ -181,8 +297,8 @@
 
 {% block scripts %}
 <style>
-.tab.tab-custom { color:var(--info); }
-.tab.tab-custom.active { color:var(--info);border-bottom-color:var(--info); }
+.tab.tab-custom-parent { color:var(--info); }
+.tab.tab-custom-parent.active { color:var(--info);border-bottom-color:var(--info); }
 </style>
 <script>
 const AGENT_ID = '{{ agent_id }}';
@@ -191,6 +307,7 @@ let _buildPollInterval = null;
 let _runConfig = null;
 let _formBuilt = false;
 let _editingSchedId = null;
+let _settingsInited = false;
 
 function buildRunForm(runConfig) {
     const modal = document.getElementById('run-modal');
@@ -287,6 +404,11 @@ async function loadAgent() {
     }
 
     injectCustomTabs(a);
+
+    if (!_settingsInited && typeof _ts_initSettings === 'function') {
+        _settingsInited = true;
+        _ts_initSettings(a);
+    }
 
     const needsPoll = isBuilding || a.status === 'running';
     if (needsPoll && !_buildPollInterval) {
@@ -912,12 +1034,25 @@ async function injectCustomTabs(agent) {
     const container = tabBar.parentElement;
     const dangerContent = document.getElementById('tab-danger');
 
-    tabs.forEach(t => {
-        const tabEl = document.createElement('div');
-        tabEl.className = 'tab tab-custom';
-        tabEl.dataset.tab = `custom-${t.id}`;
-        tabEl.textContent = t.label;
-        tabBar.insertBefore(tabEl, dangerTab);
+    const parentTab = document.createElement('div');
+    parentTab.className = 'tab tab-custom-parent';
+    parentTab.dataset.tab = 'custom-parent';
+    parentTab.innerHTML = 'Dashboard <span class="tab-parent-chevron">▾</span>';
+    tabBar.insertBefore(parentTab, dangerTab);
+
+    const subtabBar = document.createElement('div');
+    subtabBar.className = 'subtabs';
+    subtabBar.id = 'custom-subtabs';
+
+    tabBar.after(subtabBar);
+
+    const subtabEls = [];
+    tabs.forEach((t, i) => {
+        const stab = document.createElement('div');
+        stab.className = 'subtab' + (i === 0 ? ' active' : '');
+        stab.dataset.subtab = t.id;
+        stab.textContent = t.label;
+        subtabBar.appendChild(stab);
 
         const contentEl = document.createElement('div');
         contentEl.className = 'tab-content';
@@ -925,14 +1060,35 @@ async function injectCustomTabs(agent) {
         contentEl.innerHTML = '<p class="text-dim">Loading…</p>';
         container.insertBefore(contentEl, dangerContent);
 
-        tabEl.addEventListener('click', () => {
-            tabBar.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-            tabEl.classList.add('active');
+        subtabEls.push({ stab, contentEl });
+
+        stab.addEventListener('click', () => {
+            subtabBar.querySelectorAll('.subtab').forEach(s => s.classList.remove('active'));
+            stab.classList.add('active');
             container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
             contentEl.classList.add('active');
         });
 
         _loadTabFragment(agent, rootFolder, t.id, contentEl);
+    });
+
+    parentTab.addEventListener('click', () => {
+        tabBar.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        parentTab.classList.add('active');
+        container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        subtabBar.classList.add('active');
+        const activeSub = subtabBar.querySelector('.subtab.active');
+        if (activeSub) {
+            const subId = activeSub.dataset.subtab;
+            const content = document.getElementById(`tab-custom-${subId}`);
+            if (content) content.classList.add('active');
+        }
+    });
+
+    tabBar.querySelectorAll('.tab:not(.tab-custom-parent)').forEach(tab => {
+        tab.addEventListener('click', () => {
+            subtabBar.classList.remove('active');
+        });
     });
 }
 
@@ -962,6 +1118,194 @@ function _activateScripts(container) {
         oldScript.parentNode.replaceChild(newScript, oldScript);
     });
 }
+
+/* ═══════════════════════════════════════════════
+   Settings tab — LLM config + trading-specific
+   ═══════════════════════════════════════════════ */
+(function() {
+    let _tsProviderModels = {};
+    let _tsLoadedApiKeys = {};
+    let _tsTradingEnabled = false;
+
+    const PROVIDER_KEY_LABELS = {
+        gemini: "Gemini Key",
+        claude: "Claude Key",
+        deepseek: "DeepSeek Key",
+        groq: "Groq Key",
+        openai: "OpenAI Key",
+    };
+
+    function tsPopulateModels(provider, selectedModel) {
+        const sel = document.getElementById('ts-llm-model');
+        sel.innerHTML = '';
+        (_tsProviderModels[provider] || []).forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m; opt.textContent = m;
+            if (m === selectedModel) opt.selected = true;
+            sel.appendChild(opt);
+        });
+    }
+
+    function tsUpdateApiKeyField(provider) {
+        document.getElementById('ts-api-key-label').textContent = PROVIDER_KEY_LABELS[provider] || 'API Key';
+        const inp = document.getElementById('ts-api-key');
+        const masked = _tsLoadedApiKeys[provider] || '';
+        inp.value = masked;
+        inp.placeholder = masked ? '' : 'Enter API key';
+    }
+
+    const _eyeOpen = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+    const _eyeOff = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+    window._ts_toggleKeyVisibility = function() {
+        const inp = document.getElementById('ts-api-key');
+        const btn = document.getElementById('ts-eye-btn');
+        if (inp.type === 'password') {
+            inp.type = 'text';
+            inp.classList.add('ts-api-input');
+            btn.innerHTML = _eyeOff;
+            btn.title = 'Hide key';
+        } else {
+            inp.type = 'password';
+            inp.classList.remove('ts-api-input');
+            btn.innerHTML = _eyeOpen;
+            btn.title = 'Show key';
+        }
+    };
+
+    window._ts_onProviderChange = function() {
+        const p = document.getElementById('ts-llm-provider').value;
+        tsPopulateModels(p, (_tsProviderModels[p] || [])[0] || '');
+        tsUpdateApiKeyField(p);
+    };
+
+    async function tsLoadSettings() {
+        const res = await API.get(`/api/agents/${AGENT_ID}/settings`);
+        if (!res.success || !res.data) return;
+        const c = res.data;
+
+        if (c.providers) _tsProviderModels = c.providers;
+        _tsLoadedApiKeys = c.api_keys || {};
+        const provider = c.llm_provider || 'gemini';
+        document.getElementById('ts-llm-provider').value = provider;
+        tsPopulateModels(provider, c.llm_model || '');
+        tsUpdateApiKeyField(provider);
+    }
+
+    window._ts_saveSettings = async function() {
+        const btn = document.getElementById('ts-save-btn');
+        btn.disabled = true; btn.textContent = 'Saving…';
+
+        const provider  = document.getElementById('ts-llm-provider').value;
+        const apiKeyVal = document.getElementById('ts-api-key').value.trim();
+        const apiKeys = {};
+        if (apiKeyVal) apiKeys[provider] = apiKeyVal;
+
+        const body = {
+            llm_provider: provider,
+            llm_model: document.getElementById('ts-llm-model').value,
+            api_keys: Object.keys(apiKeys).length ? apiKeys : undefined,
+        };
+
+        const res = await API.put(`/api/agents/${AGENT_ID}/settings`, body);
+        btn.disabled = false; btn.textContent = 'Save Settings';
+        if (res.success) { toast('Settings saved', 'success'); tsLoadSettings(); }
+        else { toast('Failed to save: ' + (res.error || 'unknown'), 'error'); }
+    };
+
+    /* -- Trading-specific settings -- */
+
+    function tsRenderToggle(enabled) {
+        const track = document.getElementById('ts-toggle-track');
+        const label = document.getElementById('ts-toggle-text');
+        if (!track) return;
+        track.className = 'ts-toggle-track ' + (enabled ? 'on' : 'off');
+        label.className = 'ts-toggle-label ' + (enabled ? 'on' : 'off');
+        label.textContent = enabled ? 'Trading ON' : 'Trading OFF';
+    }
+
+    window._ts_toggleKillSwitch = async function() {
+        const newState = !_tsTradingEnabled;
+        const res = await API.post('/api/trading/toggle', { enabled: newState });
+        if (res.success) {
+            _tsTradingEnabled = newState;
+            tsRenderToggle(newState);
+            toast(newState ? 'Trading ENABLED' : 'Trading DISABLED', newState ? 'success' : 'error');
+        }
+    };
+
+    async function tsLoadTradingConfig() {
+        const res = await API.get('/api/trading/config');
+        if (!res.success || !res.data) return;
+        const c = res.data;
+
+        _tsTradingEnabled = c.trading_enabled;
+        tsRenderToggle(c.trading_enabled);
+
+        const rd = c.risk_defaults || {};
+        document.getElementById('ts-max-risk').value      = rd.max_risk_per_trade ?? 0.02;
+        document.getElementById('ts-max-positions').value  = rd.max_open_positions ?? 3;
+        document.getElementById('ts-max-drawdown').value   = rd.max_drawdown ?? 0.10;
+
+        const ip = c.indicator_periods || {};
+        document.getElementById('ts-adx').value       = ip.adx_period ?? 14;
+        document.getElementById('ts-atr').value       = ip.atr_period ?? 14;
+        document.getElementById('ts-bb-period').value = ip.bb_period ?? 20;
+        document.getElementById('ts-bb-std').value    = ip.bb_std ?? 2.0;
+        document.getElementById('ts-ema-fast').value  = ip.ema_fast ?? 9;
+        document.getElementById('ts-ema-mid').value   = ip.ema_mid ?? 21;
+        document.getElementById('ts-ema-slow').value  = ip.ema_slow ?? 50;
+        document.getElementById('ts-rsi').value       = ip.rsi_period ?? 14;
+        document.getElementById('ts-vol-ma').value    = ip.volume_ma_period ?? 20;
+    }
+
+    window._ts_saveTradingConfig = async function() {
+        const btn = document.getElementById('ts-trading-save-btn');
+        btn.disabled = true; btn.textContent = 'Saving…';
+
+        const body = {
+            trading_enabled: _tsTradingEnabled,
+            risk_defaults: {
+                max_risk_per_trade: parseFloat(document.getElementById('ts-max-risk').value),
+                max_open_positions: parseInt(document.getElementById('ts-max-positions').value, 10),
+                max_drawdown:       parseFloat(document.getElementById('ts-max-drawdown').value),
+            },
+            indicator_periods: {
+                adx_period:       parseInt(document.getElementById('ts-adx').value, 10),
+                atr_period:       parseInt(document.getElementById('ts-atr').value, 10),
+                bb_period:        parseInt(document.getElementById('ts-bb-period').value, 10),
+                bb_std:           parseFloat(document.getElementById('ts-bb-std').value),
+                ema_fast:         parseInt(document.getElementById('ts-ema-fast').value, 10),
+                ema_mid:          parseInt(document.getElementById('ts-ema-mid').value, 10),
+                ema_slow:         parseInt(document.getElementById('ts-ema-slow').value, 10),
+                rsi_period:       parseInt(document.getElementById('ts-rsi').value, 10),
+                volume_ma_period: parseInt(document.getElementById('ts-vol-ma').value, 10),
+            },
+        };
+
+        const res = await API.put('/api/trading/config', body);
+        btn.disabled = false; btn.textContent = 'Save Trading Settings';
+        if (res.success) { toast('Trading settings saved', 'success'); tsLoadTradingConfig(); }
+        else { toast('Failed to save: ' + (res.error || 'unknown'), 'error'); }
+    };
+
+    function _isTrading(agent) {
+        if ((agent.tags || []).includes('trading')) return true;
+        const tabs = agent.custom_tabs || [];
+        if (tabs.some(t => t.id === 'trading')) return true;
+        if ((agent.root_folder || '').includes('trading')) return true;
+        return false;
+    }
+
+    /* Expose initialiser so loadAgent can call it after agent data is known */
+    window._ts_initSettings = function(agent) {
+        tsLoadSettings();
+        if (_isTrading(agent)) {
+            document.getElementById('ts-trading-section').style.display = 'block';
+            tsLoadTradingConfig();
+        }
+    };
+})();
 
 loadAgent();
 loadFileTree();

@@ -1,0 +1,6 @@
+name: agent_lead_sourcer
+role: lead_sourcer
+description: Queries Google Maps Places API for SMBs without websites, filters by review count and rating, and stores qualified leads in MongoDB
+model: llama-3.3-70b-versatile
+temperature: 0.3
+max_tokens: 2048

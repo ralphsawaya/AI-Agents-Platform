@@ -1,7 +1,7 @@
 """Multi-provider LLM wrapper for trading agents.
 
-Supports Google Gemini, Anthropic Claude, and DeepSeek.
-The active provider/model is read from MongoDB (trading_config collection)
+Supports Google Gemini, Anthropic Claude, DeepSeek, Groq, and OpenAI.
+The active provider/model is read from MongoDB (team_settings collection)
 and falls back to environment variables.
 """
 
@@ -79,10 +79,52 @@ class _DeepSeekLLM:
         return response.choices[0].message.content
 
 
+class _GroqLLM:
+    def __init__(self, model: str, api_key: str):
+        from groq import Groq
+        self._client = Groq(api_key=api_key)
+        self.model = model
+
+    def invoke(self, prompt: str, system: str = "") -> str:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        response = self._client.chat.completions.create(
+            messages=messages,
+            model=self.model,
+            temperature=LLM_TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+        )
+        return response.choices[0].message.content
+
+
+class _OpenAILLM:
+    def __init__(self, model: str, api_key: str):
+        from openai import OpenAI
+        self._client = OpenAI(api_key=api_key)
+        self.model = model
+
+    def invoke(self, prompt: str, system: str = "") -> str:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        response = self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=LLM_TEMPERATURE,
+            max_tokens=MAX_TOKENS,
+        )
+        return response.choices[0].message.content
+
+
 _PROVIDER_MAP = {
     "gemini": _GeminiLLM,
     "claude": _ClaudeLLM,
     "deepseek": _DeepSeekLLM,
+    "groq": _GroqLLM,
+    "openai": _OpenAILLM,
 }
 
 

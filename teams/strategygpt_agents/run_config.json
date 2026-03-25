@@ -1,0 +1,32 @@
+{
+    "fields": [
+        {
+            "name": "mode",
+            "label": "Pipeline Mode",
+            "type": "select",
+            "options": ["full", "sourcing", "outreach"],
+            "required": true
+        },
+        {
+            "name": "city",
+            "label": "Target City (e.g. Miami, FL)",
+            "type": "text",
+            "placeholder": "Austin, TX",
+            "required": false
+        },
+        {
+            "name": "categories",
+            "label": "Business Categories (comma-separated)",
+            "type": "text",
+            "placeholder": "restaurant, plumber, dentist, salon",
+            "required": false
+        },
+        {
+            "name": "max_leads",
+            "label": "Max Leads per Run",
+            "type": "number",
+            "placeholder": "50",
+            "required": false
+        }
+    ]
+}

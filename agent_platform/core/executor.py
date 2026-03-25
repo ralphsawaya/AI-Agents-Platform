@@ -91,6 +91,7 @@ async def execute_agent(
     await agent_repo.set_status(agent_id, "running")
 
     env = os.environ.copy()
+    env["AGENT_ID"] = agent_id
     env["AGENT_RUN_ID"] = run_id
     env["AGENT_ARGS"] = json.dumps(args or {})
 

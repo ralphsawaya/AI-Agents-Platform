@@ -175,7 +175,7 @@ trading_agents/
 ├── ui/                        Custom tabs plugin (loaded on the agent detail page)
 │   ├── tabs.json              Tab definitions (Trading, Trades, Signals, Strategy)
 │   └── tabs/
-│       ├── trading.html       Dashboard (regime, risk, stats) + Settings (LLM, risk, indicators)
+│       ├── trading.html       Dashboard (regime, risk, stats)
 │       ├── trades.html        Recent executed trades table
 │       ├── signals.html       Recent trade signals table
 │       └── strategy.html      Strategy selection history
@@ -193,18 +193,26 @@ trading_agents/
 
 Settings can be configured in two ways:
 
-1. **Trading tab Settings panel** (recommended) — expand the Settings section at the bottom of the Trading tab to select the LLM provider/model, enter API keys, and adjust risk and indicator parameters. Click **Save Settings** to persist everything to MongoDB. These settings survive server restarts.
+1. **Settings tab** (recommended) — the **Settings** tab on the agent detail page provides:
+   - **LLM Configuration** — select the LLM provider (Gemini, Claude, DeepSeek, Groq, or OpenAI), model, and API key. These are stored in MongoDB's `team_settings` collection and shared with all agent teams.
+   - **Trading Controls** — kill switch to enable/disable trading instantly.
+   - **Risk Defaults** — max risk per trade, max open positions, max drawdown.
+   - **Indicator Periods** — ADX, ATR, BB, EMA, RSI, and Volume MA periods.
+
+   Click **Save Settings** / **Save Trading Settings** to persist everything to MongoDB. These settings survive server restarts.
 2. **Environment variables** — set in `.env` as fallback defaults. MongoDB settings take precedence when present.
 
-> **Important:** The **Indicator Periods** in the Settings panel (ADX Period, ATR Period, BB Period, EMA Fast/Mid/Slow, RSI Period, Volume MA Period) are used **only by Pipeline 1's Analyst** for computing the 19 technical indicators that feed into LLM-based regime classification. They have **no effect** on the Pine Script strategies running on TradingView. Each Pine Script strategy has its own independent parameters — see [Pine Script Strategies](#pine-script-strategies) below for details.
+> **Important:** The **Indicator Periods** in the Settings tab (ADX Period, ATR Period, BB Period, EMA Fast/Mid/Slow, RSI Period, Volume MA Period) are used **only by Pipeline 1's Analyst** for computing the 19 technical indicators that feed into LLM-based regime classification. They have **no effect** on the Pine Script strategies running on TradingView. Each Pine Script strategy has its own independent parameters — see [Pine Script Strategies](#pine-script-strategies) below for details.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `LLM_PROVIDER` | LLM provider (`gemini`, `claude`, or `deepseek`) | `gemini` |
+| `LLM_PROVIDER` | LLM provider (`gemini`, `claude`, `deepseek`, `groq`, or `openai`) | `gemini` |
 | `LLM_MODEL` | Model ID for the selected provider | `gemini-2.5-flash` |
 | `GEMINI_API_KEY` | Google Gemini API key | (required if using Gemini) |
 | `ANTHROPIC_API_KEY` | Anthropic Claude API key | (required if using Claude) |
 | `DEEPSEEK_API_KEY` | DeepSeek API key | (required if using DeepSeek) |
+| `GROQ_API_KEY` | Groq API key | (required if using Groq) |
+| `OPENAI_API_KEY` | OpenAI API key | (required if using OpenAI) |
 | `BINANCE_API_KEY` | Binance Spot API key | (required) |
 | `BINANCE_API_SECRET` | Binance Spot API secret | (required) |
 | `TRADING_PAIR` | Symbol to trade | `BTCUSDT` |
@@ -219,6 +227,8 @@ Settings can be configured in two ways:
 | Google Gemini | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash` | Free tier available |
 | Anthropic Claude | `claude-sonnet-4-20250514`, `claude-3-5-haiku-20241022` | Paid API |
 | DeepSeek | `deepseek-chat`, `deepseek-reasoner` | Paid API (very low cost) |
+| Groq | `llama-3.3-70b-versatile`, `llama-3.1-8b-instant` | Free tier available |
+| OpenAI | `gpt-4o`, `gpt-4o-mini`, `o3-mini` | Paid API |
 
 ## Running
 
@@ -226,9 +236,10 @@ Settings can be configured in two ways:
 
 1. Upload this team as a ZIP via the Dashboard (with tag `trading`).
 2. Once the venv builds, go to the agent detail page.
-3. The custom tabs (**Trading**, **Trades**, **Signals**, **Strategy**) will appear automatically.
-4. Click **Run Now** (top right) to open the run modal — select **Pipeline Mode** (`analysis` or `execution`) and **Dry Run**, then click **Run**.
-5. Alternatively, use the **Run Analysis** button on the **Trading** tab to quickly trigger an analysis run.
+3. The custom tabs (**Trading**, **Trades**, **Signals**, **Strategy**) will appear automatically, along with the built-in **Settings** tab.
+4. Configure the LLM provider, API key, risk parameters, and indicator periods on the **Settings** tab.
+5. Click **Run Now** (top right) to open the run modal — select **Pipeline Mode** (`analysis` or `execution`) and **Dry Run**, then click **Run**.
+6. Alternatively, use the **Run Analysis** button on the **Trading** tab to quickly trigger an analysis run.
 6. Or set up a 5-minute interval schedule for continuous analysis.
 
 ### Manual Analysis Run
@@ -247,7 +258,7 @@ When TradingView fires a webhook to `POST /api/webhook/tradingview`, the platfor
 ## Safety
 
 - **Dry-run mode** is enabled by default. Set `TRADING_DRY_RUN=false` in `.env` to execute real trades.
-- **Kill switch** on the Trading tab instantly disables all trading. State is persisted to MongoDB when Save Settings is clicked.
+- **Kill switch** on the Settings tab instantly disables all trading. State is persisted to MongoDB when Save Trading Settings is clicked.
 - **Duplicate detection** ignores identical signals within a 60-second window.
 - **Daily trade cap** prevents runaway execution (default: 50 trades/day).
 - **Drawdown limit** pauses trading if portfolio drops more than 10% from peak.

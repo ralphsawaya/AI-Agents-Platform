@@ -4,8 +4,9 @@ from pymongo import MongoClient
 from pymongo.collection import Collection
 
 from shared.config import (
-    MONGODB_URI, MONGODB_DB, LLM_PROVIDER, LLM_MODEL,
+    AGENT_ID, MONGODB_URI, MONGODB_DB, LLM_PROVIDER, LLM_MODEL,
     GEMINI_API_KEY, ANTHROPIC_API_KEY, DEEPSEEK_API_KEY,
+    GROQ_API_KEY, OPENAI_API_KEY,
     RISK_DEFAULTS, INDICATOR_DEFAULTS,
 )
 
@@ -13,6 +14,8 @@ _ENV_API_KEYS = {
     "gemini": GEMINI_API_KEY,
     "claude": ANTHROPIC_API_KEY,
     "deepseek": DEEPSEEK_API_KEY,
+    "groq": GROQ_API_KEY,
+    "openai": OPENAI_API_KEY,
 }
 
 _client: MongoClient | None = None
@@ -56,11 +59,25 @@ def get_trading_config() -> Collection:
 
 # ----- Config loaders (read from MongoDB, fall back to env/defaults) -----
 
-def load_llm_config() -> tuple[str, str, str]:
-    """Return (provider, model, api_key) from the stored trading config.
+def get_team_settings() -> Collection:
+    return get_collection("team_settings")
 
+
+def load_llm_config() -> tuple[str, str, str]:
+    """Return (provider, model, api_key) from team_settings (shared across all teams).
+
+    Falls back to trading_config, then to environment variables.
     API keys stored in MongoDB take precedence over environment variables.
     """
+    if AGENT_ID:
+        ts_doc = get_team_settings().find_one({"_id": AGENT_ID})
+        if ts_doc:
+            provider = ts_doc.get("llm_provider", LLM_PROVIDER)
+            model = ts_doc.get("llm_model", LLM_MODEL)
+            stored_keys = ts_doc.get("api_keys", {})
+            api_key = stored_keys.get(provider) or _ENV_API_KEYS.get(provider, "")
+            return provider, model, api_key
+
     doc = get_trading_config().find_one(sort=[("updated_at", -1)])
     if doc:
         provider = doc.get("llm_provider", LLM_PROVIDER)

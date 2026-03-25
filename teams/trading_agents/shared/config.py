@@ -2,10 +2,14 @@
 
 import os
 
+AGENT_ID = os.getenv("AGENT_ID", "")
+
 # --- LLM provider keys ---
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 LLM_MODEL = os.getenv("LLM_MODEL", "gemini-2.5-flash")
@@ -54,6 +58,16 @@ LLM_PROVIDERS = {
         "label": "DeepSeek",
         "models": ["deepseek-chat", "deepseek-reasoner"],
         "default": "deepseek-chat",
+    },
+    "groq": {
+        "label": "Groq",
+        "models": ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"],
+        "default": "llama-3.3-70b-versatile",
+    },
+    "openai": {
+        "label": "OpenAI",
+        "models": ["gpt-4o", "gpt-4o-mini", "o3-mini"],
+        "default": "gpt-4o",
     },
 }
 

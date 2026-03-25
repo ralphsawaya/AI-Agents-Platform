@@ -1,0 +1,6 @@
+name: agent_voice_caller
+role: voice_caller
+description: Places AI voice calls to qualified leads using an external voice API (Bland.ai/Vapi/Twilio), delivers the website pitch, and records the outcome
+model: llama-3.3-70b-versatile
+temperature: 0.3
+max_tokens: 2048

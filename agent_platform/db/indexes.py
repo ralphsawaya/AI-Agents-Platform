@@ -109,6 +109,12 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         IndexModel([("_builtin_id", ASCENDING)], unique=True, sparse=True),
     ])
 
+    # --- Per-team LLM settings ---
+    team_settings = db["team_settings"]
+    await _safe_create_indexes(team_settings, [
+        IndexModel([("updated_at", DESCENDING)]),
+    ])
+
     # --- OHLCV timeseries cache (4-year TTL) ---
     try:
         await db.create_collection(
