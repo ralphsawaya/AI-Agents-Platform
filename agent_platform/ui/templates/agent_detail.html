@@ -28,49 +28,6 @@
 <!-- Overview -->
 <div class="tab-content active" id="tab-overview">
     <div class="stat-cards" id="overview-meta"></div>
-    <!-- Collapsible Detected Nodes -->
-    <div class="collapsible-section collapsed" id="detected-nodes-section">
-        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('detected-nodes-section', event)">
-            <h3>Detected Nodes</h3>
-            <span class="collapsible-chevron">▾</span>
-        </div>
-        <div class="collapsible-body">
-            <div id="detected-nodes"><span class="text-dim">—</span></div>
-        </div>
-    </div>
-
-    <!-- Collapsible Detected Tools -->
-    <div class="collapsible-section collapsed" id="detected-tools-section">
-        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('detected-tools-section', event)">
-            <h3>Detected Tools</h3>
-            <span class="collapsible-chevron">▾</span>
-        </div>
-        <div class="collapsible-body">
-            <div id="detected-tools"><span class="text-dim">—</span></div>
-        </div>
-    </div>
-
-    <!-- Collapsible Agent Folders -->
-    <div class="collapsible-section collapsed" id="agent-folders-section">
-        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('agent-folders-section', event)">
-            <h3>Agent Folders</h3>
-            <span class="collapsible-chevron">▾</span>
-        </div>
-        <div class="collapsible-body">
-            <div id="agent-folders" class="pill-group"><span class="text-dim">—</span></div>
-        </div>
-    </div>
-
-    <!-- Collapsible Description -->
-    <div id="readme-section" class="collapsible-section collapsed" style="display:none">
-        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('readme-section', event)">
-            <h3>Description</h3>
-            <span class="collapsible-chevron">▾</span>
-        </div>
-        <div class="collapsible-body">
-            <div id="readme-body" class="readme-md"></div>
-        </div>
-    </div>
 
     <!-- Collapsible Pipeline Graph -->
     <div class="collapsible-section" id="graph-section">
@@ -112,6 +69,50 @@
                 </div>
                 <div id="detail-node-body"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- Collapsible Detected Nodes -->
+    <div class="collapsible-section collapsed" id="detected-nodes-section">
+        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('detected-nodes-section', event)">
+            <h3>Detected Nodes</h3>
+            <span class="collapsible-chevron">▾</span>
+        </div>
+        <div class="collapsible-body">
+            <div id="detected-nodes"><span class="text-dim">—</span></div>
+        </div>
+    </div>
+
+    <!-- Collapsible Detected Tools -->
+    <div class="collapsible-section collapsed" id="detected-tools-section">
+        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('detected-tools-section', event)">
+            <h3>Detected Tools</h3>
+            <span class="collapsible-chevron">▾</span>
+        </div>
+        <div class="collapsible-body">
+            <div id="detected-tools"><span class="text-dim">—</span></div>
+        </div>
+    </div>
+
+    <!-- Collapsible Agent Folders -->
+    <div class="collapsible-section collapsed" id="agent-folders-section">
+        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('agent-folders-section', event)">
+            <h3>Agent Folders</h3>
+            <span class="collapsible-chevron">▾</span>
+        </div>
+        <div class="collapsible-body">
+            <div id="agent-folders" class="pill-group"><span class="text-dim">—</span></div>
+        </div>
+    </div>
+
+    <!-- Collapsible Description -->
+    <div id="readme-section" class="collapsible-section collapsed" style="display:none">
+        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('readme-section', event)">
+            <h3>Description</h3>
+            <span class="collapsible-chevron">▾</span>
+        </div>
+        <div class="collapsible-body">
+            <div id="readme-body" class="readme-md"></div>
         </div>
     </div>
 </div>
