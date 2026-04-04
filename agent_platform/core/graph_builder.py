@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from agent_platform.core.agent_manager import _detect_llm_usage
 from agent_platform.db.client import get_database
 from agent_platform.db.repositories.agent_repo import AgentRepository
 from agent_platform.db.repositories.relationship_repo import RelationshipRepository
@@ -257,6 +258,11 @@ async def get_team_graph(agent_id: str) -> dict[str, Any]:
     orch_path = root_dir / "orchestrator"
     pipeline_edges = _get_orchestrator_pipeline_edges(orch_path, folder_set) if orch_path.exists() else []
 
+    # LLM usage per agent folder (fall back to live scan for older agents)
+    llm_by_agent: dict[str, bool] = agent.get("llm_by_agent") or {}
+    if not llm_by_agent:
+        llm_by_agent = _detect_llm_usage(root_dir, agent_folders)
+
     # Build node list
     agent_colors = ["#3b82f6", "#06b6d4", "#8b5cf6", "#10b981", "#f59e0b", "#ef4444"]
     nodes: list[dict[str, Any]] = [
@@ -268,13 +274,27 @@ async def get_team_graph(agent_id: str) -> dict[str, Any]:
             "description": "Coordinates and sequences all agents in the pipeline",
         }
     ]
+    any_uses_llm = False
     for i, folder in enumerate(agent_folders):
+        uses_llm = llm_by_agent.get(folder, False)
+        if uses_llm:
+            any_uses_llm = True
         nodes.append({
             "id": folder,
             "label": folder.replace("_", " ").title(),
             "type": "agent",
             "color": agent_colors[i % len(agent_colors)],
             "sub_nodes": per_agent_nodes.get(folder, []),
+            "uses_llm": uses_llm,
+        })
+
+    if any_uses_llm:
+        nodes.append({
+            "id": "llm",
+            "label": "LLM",
+            "type": "llm",
+            "sub_nodes": [f for f in agent_folders if llm_by_agent.get(f, False)],
+            "description": "Large Language Model used by agents for reasoning and generation",
         })
 
     # Build edge list — prefer scanned orchestrator edges; fall back to internal_refs
@@ -310,6 +330,17 @@ async def get_team_graph(agent_id: str) -> dict[str, Any]:
                     "target": agent_folders[i + 1],
                     "label": "output → input",
                     "type": "pipeline",
+                })
+
+    # Agent → LLM edges
+    if any_uses_llm:
+        for folder in agent_folders:
+            if llm_by_agent.get(folder, False):
+                edges.append({
+                    "source": folder,
+                    "target": "llm",
+                    "label": "calls",
+                    "type": "llm",
                 })
 
     return {

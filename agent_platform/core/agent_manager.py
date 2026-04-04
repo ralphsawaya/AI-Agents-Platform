@@ -105,6 +105,108 @@ def _detect_nodes_and_tools(
     return nodes, tools, nodes_by_agent, tools_by_agent
 
 
+_LLM_CLASS_NAMES = {
+    "ChatOpenAI", "AzureChatOpenAI", "ChatAnthropic", "ChatGoogleGenerativeAI",
+    "ChatCohere", "ChatMistralAI", "ChatOllama", "ChatGroq", "ChatBedrock",
+    "ChatVertexAI", "ChatFireworks", "ChatTogether", "ChatPerplexity",
+    "init_chat_model",
+}
+
+_LLM_MODULE_PREFIXES = (
+    "langchain_openai", "langchain_anthropic", "langchain_google_genai",
+    "langchain_cohere", "langchain_mistralai", "langchain_ollama",
+    "langchain_groq", "langchain_aws", "langchain_google_vertexai",
+    "langchain_fireworks", "langchain_together",
+    "openai", "anthropic", "groq", "cohere", "mistralai",
+    "google.genai", "google.generativeai",
+)
+
+
+def _detect_llm_usage(
+    source_dir: Path,
+    agent_folders: list[str] | None = None,
+) -> dict[str, bool]:
+    """Detect which agent folders instantiate or import LLM chat models.
+
+    Handles both direct LLM SDK imports inside agent folders and indirect
+    usage via shared modules (e.g. ``from shared.llm import get_llm``).
+
+    Returns a dict mapping agent folder name → True for folders that use LLMs.
+    """
+    llm_by_agent: dict[str, bool] = {}
+    folder_set = set(agent_folders or [])
+
+    # Phase 1 — check if any non-agent module (e.g. shared/) provides LLM
+    shared_llm_modules: set[str] = set()
+    for py_file in source_dir.rglob("*.py"):
+        rel_parts = py_file.relative_to(source_dir).parts
+        if rel_parts and rel_parts[0] in folder_set:
+            continue
+        if "llm" in py_file.stem.lower():
+            dotted = ".".join(rel_parts).removesuffix(".py")
+            shared_llm_modules.add(dotted)
+
+    # Phase 2 — scan agent folder files for LLM usage
+    for py_file in source_dir.rglob("*.py"):
+        try:
+            tree = ast.parse(py_file.read_text(encoding="utf-8", errors="replace"))
+        except SyntaxError:
+            continue
+
+        owning_folder: str | None = None
+        if folder_set:
+            rel_parts = py_file.relative_to(source_dir).parts
+            if rel_parts and rel_parts[0] in folder_set:
+                owning_folder = rel_parts[0]
+
+        if not owning_folder:
+            continue
+
+        if owning_folder in llm_by_agent:
+            continue
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                # Direct LLM SDK / LangChain imports
+                if any(node.module.startswith(p) for p in _LLM_MODULE_PREFIXES):
+                    llm_by_agent[owning_folder] = True
+                    break
+                # Import from a shared LLM module (e.g. shared.llm)
+                if any(node.module == m or node.module.startswith(m + ".") for m in shared_llm_modules):
+                    llm_by_agent[owning_folder] = True
+                    break
+                # Import with "llm" in the module path (e.g. from shared.llm import get_llm)
+                if ".llm" in node.module or node.module.endswith(".llm"):
+                    llm_by_agent[owning_folder] = True
+                    break
+                if node.names:
+                    for alias in node.names:
+                        if alias.name in _LLM_CLASS_NAMES:
+                            llm_by_agent[owning_folder] = True
+                            break
+                    if owning_folder in llm_by_agent:
+                        break
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if any(alias.name.startswith(p) for p in _LLM_MODULE_PREFIXES):
+                        llm_by_agent[owning_folder] = True
+                        break
+                if owning_folder in llm_by_agent:
+                    break
+            elif isinstance(node, ast.Call):
+                func = node.func
+                name = None
+                if isinstance(func, ast.Name):
+                    name = func.id
+                elif isinstance(func, ast.Attribute):
+                    name = func.attr
+                if name and name in _LLM_CLASS_NAMES:
+                    llm_by_agent[owning_folder] = True
+                    break
+
+    return llm_by_agent
+
+
 def _detect_inter_agent_refs(
     source_dir: Path, agent_folders: list[str]
 ) -> list[dict[str, str]]:
@@ -324,6 +426,7 @@ async def register_agent(
     detected_nodes, detected_tools, nodes_by_agent, tools_by_agent = (
         _detect_nodes_and_tools(root_dir, validation.agent_folders)
     )
+    llm_by_agent = _detect_llm_usage(root_dir, validation.agent_folders)
     agent_configs = _parse_agent_configs(root_dir, validation.agent_folders)
     run_config = _parse_run_config(root_dir)
     custom_tabs = _parse_custom_tabs(root_dir)
@@ -348,6 +451,7 @@ async def register_agent(
         "detected_tools": detected_tools,
         "nodes_by_agent": nodes_by_agent,
         "tools_by_agent": tools_by_agent,
+        "llm_by_agent": llm_by_agent,
     }
     if run_config:
         agent_doc["run_config"] = run_config

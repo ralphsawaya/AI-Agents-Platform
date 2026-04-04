@@ -1150,6 +1150,43 @@ label {
     font-style: italic;
 }
 
+/* LLM card */
+.cy-card-llm {
+    background: #1c1c24;
+    border: 1.5px solid rgba(217,70,239,0.45);
+    min-width: 120px;
+}
+
+.cy-card-llm .cy-card-body {
+    padding: 8px 12px 9px;
+    background: rgba(0,0,0,0.22);
+}
+
+.cy-card-llm .cy-card-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fff;
+    text-align: center;
+}
+
+.cy-card-llm .cy-item {
+    font-size: 10px;
+    color: rgba(255,255,255,0.7);
+    justify-content: center;
+}
+
+/* LLM badge on agent cards */
+.cy-llm-badge {
+    margin-left: 6px;
+    font-size: 9px;
+    font-weight: 500;
+    background: rgba(217,70,239,0.25);
+    color: #e879f9;
+    padding: 1px 5px;
+    border-radius: 4px;
+    vertical-align: middle;
+}
+
 /* ══════════════════════════════════════
    PIPELINE GRAPH PAGE
    ══════════════════════════════════════ */
@@ -1221,10 +1258,12 @@ label {
 }
 .lnode-orch  { background: #6366f1; border-radius: 50%; }
 .lnode-agent { background: #3b82f6; border-radius: 3px; }
+.lnode-llm   { background: #d946ef; border-radius: 50%; transform: rotate(45deg); }
 
 .ledge { font-family: monospace; font-size: .8rem; }
 .ledge-invoke   { color: #818cf8; }
 .ledge-pipeline { color: #38bdf8; }
+.ledge-llm      { color: #d946ef; }
 
 /* ── Info panel ── */
 #info-panel {
@@ -1320,6 +1359,7 @@ label {
 }
 .info-type-orchestrator { background: rgba(99,102,241,.2); color: #a5b4fc; }
 .info-type-agent        { background: rgba(59,130,246,.2);  color: #93c5fd; }
+.info-type-llm          { background: rgba(217,70,239,.2);  color: #e879f9; }
 
 /* Subnode list */
 .subnode-row {

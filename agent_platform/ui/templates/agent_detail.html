@@ -28,12 +28,38 @@
 <!-- Overview -->
 <div class="tab-content active" id="tab-overview">
     <div class="stat-cards" id="overview-meta"></div>
-    <h3 class="mb-1">Detected Nodes</h3>
-    <div id="detected-nodes" class="mb-1"><span class="text-dim">—</span></div>
-    <h3 class="mb-1">Detected Tools</h3>
-    <div id="detected-tools" class="mb-1"><span class="text-dim">—</span></div>
-    <h3 class="mb-1">Agent Folders</h3>
-    <div id="agent-folders" class="pill-group mb-1"><span class="text-dim">—</span></div>
+    <!-- Collapsible Detected Nodes -->
+    <div class="collapsible-section collapsed" id="detected-nodes-section">
+        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('detected-nodes-section', event)">
+            <h3>Detected Nodes</h3>
+            <span class="collapsible-chevron">▾</span>
+        </div>
+        <div class="collapsible-body">
+            <div id="detected-nodes"><span class="text-dim">—</span></div>
+        </div>
+    </div>
+
+    <!-- Collapsible Detected Tools -->
+    <div class="collapsible-section collapsed" id="detected-tools-section">
+        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('detected-tools-section', event)">
+            <h3>Detected Tools</h3>
+            <span class="collapsible-chevron">▾</span>
+        </div>
+        <div class="collapsible-body">
+            <div id="detected-tools"><span class="text-dim">—</span></div>
+        </div>
+    </div>
+
+    <!-- Collapsible Agent Folders -->
+    <div class="collapsible-section collapsed" id="agent-folders-section">
+        <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('agent-folders-section', event)">
+            <h3>Agent Folders</h3>
+            <span class="collapsible-chevron">▾</span>
+        </div>
+        <div class="collapsible-body">
+            <div id="agent-folders" class="pill-group"><span class="text-dim">—</span></div>
+        </div>
+    </div>
 
     <!-- Collapsible Description -->
     <div id="readme-section" class="collapsible-section collapsed" style="display:none">
@@ -47,7 +73,7 @@
     </div>
 
     <!-- Collapsible Pipeline Graph -->
-    <div class="collapsible-section collapsed" id="graph-section">
+    <div class="collapsible-section" id="graph-section">
         <div class="collapsible-header" onmousedown="collapsibleMousedown(event)" onclick="toggleSection('graph-section', event)">
             <h3>Pipeline Graph</h3>
             <span class="collapsible-chevron">▾</span>
@@ -71,8 +97,10 @@
                 <div id="detail-graph-legend" style="display:none; position:absolute; bottom:.75rem; left:.75rem; background:rgba(9,9,11,.88); border:1px solid var(--border); border-radius:var(--radius); padding:.5rem .75rem; backdrop-filter:blur(6px); z-index:10;">
                     <div class="legend-row"><span class="lnode lnode-orch"></span> Orchestrator</div>
                     <div class="legend-row"><span class="lnode lnode-agent"></span> Agent</div>
+                    <div class="legend-row"><span class="lnode lnode-llm"></span> LLM</div>
                     <div class="legend-row"><span class="ledge ledge-invoke">──▶</span> Invokes (orchestrator calls agent)</div>
                     <div class="legend-row"><span class="ledge ledge-pipeline">╌╌▶</span> Pipeline (output passed forward)</div>
+                    <div class="legend-row"><span class="ledge ledge-llm">──▶</span> Calls LLM</div>
                 </div>
             </div>
             <!-- Node detail panel -->
@@ -1099,12 +1127,23 @@ const STEP_GLYPHS = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'
 /* Build an HTML label for a Cytoscape node */
 function _nodeHtmlTpl(data) {
     const isOrch = data.type === 'orchestrator';
+    const isLLM  = data.type === 'llm';
     const items  = (data.sub_nodes || []).slice(0, 5);
     const more   = (data.sub_nodes || []).length > 5 ? `<div class="cy-item-more">+${data.sub_nodes.length - 5} more</div>` : '';
     const itemsHtml = items.map(s =>
         `<div class="cy-item"><span class="cy-item-dot"></span>${s.replace(/_/g,' ')}</div>`
     ).join('');
 
+    if (isLLM) {
+        return `<div class="cy-card cy-card-llm">
+            <div class="cy-card-header" style="background:#d946ef">
+                <div class="cy-card-title">🧠 LLM</div>
+            </div>
+            <div class="cy-card-body">
+                ${itemsHtml || '<div class="cy-item-empty">No agents connected</div>'}${more}
+            </div>
+        </div>`;
+    }
     if (isOrch) {
         return `<div class="cy-card cy-card-orch">
             <div class="cy-card-title">Orchestrator</div>
@@ -1112,9 +1151,10 @@ function _nodeHtmlTpl(data) {
             ${itemsHtml}${more}
         </div>`;
     }
+    const llmBadge = data.uses_llm ? '<span class="cy-llm-badge">🧠 LLM</span>' : '';
     return `<div class="cy-card cy-card-agent" style="--c:${data.color}">
         <div class="cy-card-header" style="background:${data.color}">
-            <div class="cy-card-title">${data.displayLabel}</div>
+            <div class="cy-card-title">${data.displayLabel}${llmBadge}</div>
         </div>
         <div class="cy-card-body">
             ${itemsHtml || '<div class="cy-item-empty">No nodes detected</div>'}${more}
@@ -1151,18 +1191,19 @@ async function loadDetailGraph() {
     nodes.forEach(n => {
         const subLen = (n.sub_nodes || []).length;
         const isOrch = n.type === 'orchestrator';
+        const isLLM  = n.type === 'llm';
         /* node is invisible — HTML label provides all visuals */
         els.push({ data: {
             id: n.id,
             label: '',
             displayLabel: n.label,
             type: n.type,
-            color: n.color || '#6366f1',
+            color: n.color || (isLLM ? '#d946ef' : '#6366f1'),
             sub_nodes: n.sub_nodes || [],
             description: n.description || '',
-            /* height: header(32) + sep(1) + items(28*n) + padding(16); orch fixed */
-            nodeHeight: isOrch ? 120 : Math.max(80, 76 + subLen * 22),
-            nodeWidth:  isOrch ? 120 : 160,
+            uses_llm: n.uses_llm || false,
+            nodeHeight: isOrch ? 120 : isLLM ? Math.max(80, 76 + subLen * 22) : Math.max(80, 76 + subLen * 22),
+            nodeWidth:  isOrch ? 120 : isLLM ? 140 : 160,
         }});
     });
     enrichedEdges.forEach((e, i) => els.push({ data: {
@@ -1203,14 +1244,22 @@ function showDetailNodeInfo(data) {
     const name  = document.getElementById('detail-node-name');
     const body  = document.getElementById('detail-node-body');
 
-    badge.textContent = data.type === 'orchestrator' ? 'Orchestrator' : 'Agent';
+    const typeLabels = { orchestrator: 'Orchestrator', agent: 'Agent', llm: 'LLM' };
+    badge.textContent = typeLabels[data.type] || 'Node';
     badge.className   = `info-type-badge info-type-${data.type}`;
     name.textContent  = data.displayLabel || data.label.split('\n')[0];
 
     const team = _detailGraphData?.team || {};
     let html = '';
 
-    if (data.type === 'orchestrator') {
+    if (data.type === 'llm') {
+        html += `<p class="detail-node-desc">Large Language Model used by agents for reasoning, generation, and decision-making.</p>`;
+        if (data.sub_nodes.length) {
+            html += `<div class="detail-node-section-label">Connected Agents</div><ol class="detail-node-list">`;
+            data.sub_nodes.forEach(s => { html += `<li>${s.replace(/_/g, ' ')}</li>`; });
+            html += `</ol>`;
+        }
+    } else if (data.type === 'orchestrator') {
         html += `<p class="detail-node-desc">Coordinates and sequences all agents in the pipeline. Routes run arguments to each agent in order.</p>`;
         if (data.sub_nodes.length) {
             html += `<div class="detail-node-section-label">Agents Controlled</div><ol class="detail-node-list">`;
@@ -1251,18 +1300,34 @@ function showDetailNodeInfo(data) {
 }
 
 function buildDetailPresetLayout(nodes, edges) {
+    const pipelineEdges = edges.filter(e => e.type !== 'llm' && (e.edgeType || e.type) !== 'llm');
     const edgeMap = {};
-    edges.forEach(e => { if (!edgeMap[e.source]) edgeMap[e.source] = []; edgeMap[e.source].push(e.target); });
+    pipelineEdges.forEach(e => { if (!edgeMap[e.source]) edgeMap[e.source] = []; edgeMap[e.source].push(e.target); });
     const order = [], visited = new Set(), queue = ['orchestrator'];
     while (queue.length) {
         const cur = queue.shift();
-        if (visited.has(cur)) continue;
+        if (visited.has(cur) || cur === 'llm') continue;
         visited.add(cur); order.push(cur);
         (edgeMap[cur] || []).forEach(t => { if (!visited.has(t)) queue.push(t); });
     }
-    nodes.forEach(n => { if (!visited.has(n.id)) order.push(n.id); });
+    nodes.forEach(n => { if (!visited.has(n.id) && n.id !== 'llm') order.push(n.id); });
     const positions = {};
     order.forEach((id, i) => { positions[id] = { x: i * 300, y: 0 }; });
+
+    const hasLLM = nodes.some(n => n.id === 'llm');
+    if (hasLLM) {
+        const agentsUsingLLM = edges
+            .filter(e => e.target === 'llm' || (e.data && e.data.target === 'llm'))
+            .map(e => e.source || (e.data && e.data.source));
+        let avgX = 0;
+        if (agentsUsingLLM.length) {
+            avgX = agentsUsingLLM.reduce((sum, id) => sum + (positions[id]?.x || 0), 0) / agentsUsingLLM.length;
+        } else {
+            avgX = (order.length - 1) * 150;
+        }
+        positions['llm'] = { x: avgX, y: 200 };
+    }
+
     return { name: 'preset', positions, fit: true, padding: 70 };
 }
 
@@ -1320,6 +1385,19 @@ function detailGraphStyle() {
             },
         },
         {
+            /* LLM: diamond shape — HTML label provides all visuals */
+            selector: 'node[type = "llm"]',
+            style: {
+                shape: 'diamond',
+                width: 'data(nodeWidth)', height: 'data(nodeHeight)',
+                'background-color': '#d946ef',
+                'background-opacity': 0,
+                'border-color': '#d946ef', 'border-width': 2,
+                'border-opacity': 0,
+                label: '',
+            },
+        },
+        {
             selector: 'node:selected',
             style: {
                 'overlay-color': '#fff', 'overlay-padding': 8, 'overlay-opacity': 0.08,
@@ -1357,6 +1435,25 @@ function detailGraphStyle() {
                 'text-background-color': '#082f49',
                 'text-border-color': '#38bdf8',
                 color: '#7dd3fc',
+            },
+        },
+        {
+            selector: 'edge[edgeType = "llm"]',
+            style: {
+                width: 2,
+                'line-color': '#d946ef',
+                'target-arrow-color': '#d946ef',
+                'target-arrow-shape': 'triangle',
+                'curve-style': 'bezier',
+                'line-style': 'dashed',
+                'line-dash-pattern': [4, 4],
+                label: 'data(label)',
+                ...edgeLabelBase,
+                'font-size': '10px',
+                'font-weight': '500',
+                'text-background-color': '#3b0764',
+                'text-border-color': '#d946ef',
+                color: '#e879f9',
             },
         },
         {
