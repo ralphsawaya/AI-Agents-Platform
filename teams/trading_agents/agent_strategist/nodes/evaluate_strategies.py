@@ -28,7 +28,7 @@ def evaluate_strategies(state: dict) -> dict:
     regime = state.get("regime", "ranging")
     confidence = state.get("confidence", 0.0)
 
-    candidates = REGIME_STRATEGY_MAP.get(regime, ["mean_reversion"])
+    candidates = REGIME_STRATEGY_MAP.get(regime, ["rsi_momentum"])
 
     if confidence < 0.5:
         candidates = ALL_STRATEGIES

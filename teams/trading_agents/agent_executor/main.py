@@ -6,7 +6,7 @@ from agent_executor.agent import build_executor_graph
 def main():
     graph = build_executor_graph()
     result = graph.invoke({
-        "signal": {"action": "buy", "price": 50000.0, "ticker": "BTCUSDT", "strategy_name": "trend_following"},
+        "signal": {"action": "buy", "price": 50000.0, "ticker": "BTCUSDT", "strategy_name": "ema_trend"},
         "risk_params": {"position_size": 0.001, "stop_loss_price": 49000.0, "take_profit_price": 52000.0, "approved": True},
         "dry_run": True,
         "order_id": "",

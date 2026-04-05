@@ -1105,10 +1105,6 @@ var _SLIDER_DEFAULTS = {
     ema_trend:        {train: 180, test: 30},
     rsi_momentum:     {train: 180, test: 30},
     macd_trend:       {train: 180, test: 30},
-    pullback:         {train: 21,  test: 5},
-    trend_following:  {train: 90,  test: 21},
-    mean_reversion:   {train: 45,  test: 10},
-    swing_momentum:   {train: 90,  test: 21},
 };
 
 async function loadStrategies() {
@@ -1407,20 +1403,8 @@ function onFold(f) {
     } else if (strat === 'macd_trend') {
         paramStr = 'MACD_F(' + f.params.macd_fast + '), MACD_S(' + f.params.macd_slow +
                    '), Trail(' + f.params.atr_trail + ')';
-    } else if (strat === 'pullback') {
-        paramStr = 'Slow(' + f.params.ema_slow + '), Fast(' + f.params.ema_fast +
-                   '), Vol(' + f.params.vol_thresh + '), Trail(' + f.params.atr_trail + ')';
-    } else if (strat === 'trend_following') {
-        paramStr = 'Fast(' + f.params.ema_fast + '), Mid(' + f.params.ema_mid +
-                   '), Slow(' + (f.params.ema_slow || 50) + '), ADX(' + f.params.adx_thresh +
-                   '), Trail(' + f.params.atr_trail + ')';
-    } else if (strat === 'swing_momentum') {
-        paramStr = 'RSI(' + f.params.rsi_len + '), EMA(' + f.params.ema_len +
-                   '), Vol(' + f.params.vol_thresh + '), Trail(' + f.params.atr_trail + ')';
     } else {
-        paramStr = 'BB(' + f.params.bb_len + ',' + f.params.bb_std +
-                   '), RSI(' + f.params.rsi_os + '/' + f.params.rsi_ob +
-                   '), Vol×' + (f.params.vol_mult || 1.0) + ', SL×' + (f.params.sl_mult || 1.5);
+        paramStr = Object.keys(f.params).map(function(k) { return k + '=' + f.params[k]; }).join(', ');
     }
 
     const retClr = f.oos_return >= 0 ? '#22c55e' : '#ef4444';
@@ -1505,66 +1489,27 @@ function renderParamTable(data) {
     const s = data.strategy;
     const folds = data.folds;
 
-    let hdr;
-    if (s === 'ema_trend') {
-        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-              '<th>EMA Fast</th><th>EMA Slow</th><th>ATR Trail</th>' +
+    const _PARAM_COLS = {
+        ema_trend:    ['EMA Fast', 'EMA Slow', 'ATR Trail'],
+        rsi_momentum: ['RSI Len', 'EMA Len', 'ATR Trail'],
+        macd_trend:   ['MACD Fast', 'MACD Slow', 'ATR Trail'],
+    };
+    const _PARAM_KEYS = {
+        ema_trend:    ['ema_fast', 'ema_slow', 'atr_trail'],
+        rsi_momentum: ['rsi_len', 'ema_len', 'atr_trail'],
+        macd_trend:   ['macd_fast', 'macd_slow', 'atr_trail'],
+    };
+
+    const cols = _PARAM_COLS[s] || Object.keys(folds[0] ? folds[0].params : {});
+    const keys = _PARAM_KEYS[s] || cols;
+    const hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
+              cols.map(function(c) { return '<th>' + c + '</th>'; }).join('') +
               '<th>Train Sharpe</th><th>OOS Return</th>';
-    } else if (s === 'rsi_momentum') {
-        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-              '<th>RSI Len</th><th>EMA Len</th><th>ATR Trail</th>' +
-              '<th>Train Sharpe</th><th>OOS Return</th>';
-    } else if (s === 'macd_trend') {
-        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-              '<th>MACD Fast</th><th>MACD Slow</th><th>ATR Trail</th>' +
-              '<th>Train Sharpe</th><th>OOS Return</th>';
-    } else if (s === 'pullback') {
-        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-              '<th>EMA Slow</th><th>EMA Fast</th><th>Vol Thresh</th><th>ATR Trail</th>' +
-              '<th>Train Sharpe</th><th>OOS Return</th>';
-    } else if (s === 'trend_following') {
-        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-              '<th>EMA Fast</th><th>EMA Mid</th><th>EMA Slow</th><th>ADX Thresh</th><th>ATR Trail</th>' +
-              '<th>Train Sharpe</th><th>OOS Return</th>';
-    } else if (s === 'swing_momentum') {
-        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-              '<th>RSI Len</th><th>EMA Len</th><th>Vol Thresh</th><th>ATR Trail</th>' +
-              '<th>Train Sharpe</th><th>OOS Return</th>';
-    } else {
-        hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-              '<th>BB Len</th><th>BB Std</th><th>RSI OS</th><th>RSI OB</th>' +
-              '<th>Vol×</th><th>SL×</th>' +
-              '<th>Train Sharpe</th><th>OOS Return</th>';
-    }
 
     const rows = folds.map(function(f, i) {
         const rc = f.oos_return >= 0 ? 'color:#22c55e' : 'color:#ef4444';
         const sign = f.oos_return > 0 ? '+' : '';
-        let pc;
-        if (s === 'ema_trend') {
-            pc = '<td>' + f.params.ema_fast + '</td><td>' + f.params.ema_slow +
-                 '</td><td>' + f.params.atr_trail + '</td>';
-        } else if (s === 'rsi_momentum') {
-            pc = '<td>' + f.params.rsi_len + '</td><td>' + f.params.ema_len +
-                 '</td><td>' + f.params.atr_trail + '</td>';
-        } else if (s === 'macd_trend') {
-            pc = '<td>' + f.params.macd_fast + '</td><td>' + f.params.macd_slow +
-                 '</td><td>' + f.params.atr_trail + '</td>';
-        } else if (s === 'pullback') {
-            pc = '<td>' + f.params.ema_slow + '</td><td>' + f.params.ema_fast +
-                 '</td><td>' + f.params.vol_thresh + '</td><td>' + f.params.atr_trail + '</td>';
-        } else if (s === 'trend_following') {
-            pc = '<td>' + f.params.ema_fast + '</td><td>' + f.params.ema_mid +
-                 '</td><td>' + (f.params.ema_slow || 50) + '</td><td>' + f.params.adx_thresh +
-                 '</td><td>' + f.params.atr_trail + '</td>';
-        } else if (s === 'swing_momentum') {
-            pc = '<td>' + f.params.rsi_len + '</td><td>' + f.params.ema_len +
-                 '</td><td>' + f.params.vol_thresh + '</td><td>' + f.params.atr_trail + '</td>';
-        } else {
-            pc = '<td>' + f.params.bb_len + '</td><td>' + f.params.bb_std +
-                 '</td><td>' + f.params.rsi_os + '</td><td>' + f.params.rsi_ob +
-                 '</td><td>' + (f.params.vol_mult || 1.0) + '</td><td>' + (f.params.sl_mult || 1.5) + '</td>';
-        }
+        const pc = keys.map(function(k) { return '<td>' + (f.params[k] != null ? f.params[k] : '') + '</td>'; }).join('');
         return '<tr><td>Fold ' + (i+1) + '</td>' +
                '<td>' + f.train_start + ' to ' + f.train_end + '</td>' +
                '<td>' + f.test_start + ' to ' + f.test_end + '</td>' +

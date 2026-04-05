@@ -378,7 +378,7 @@ Each Pine Script strategy is translated to Python with the same core logic (incl
 | `rsi_momentum` | **4h** | RSI, EMA, ATR | RSI crosses above 50 + price > EMA → long; RSI crosses below 50 + price < EMA → short | ATR trailing stop or opposite RSI cross | `rsi_len`, `ema_len`, `atr_trail` |
 | `macd_trend` | **4h** | MACD histogram, EMA, ATR | MACD histogram turns positive + price > EMA → long; histogram turns negative + price < EMA → short | ATR trailing stop or opposite MACD cross | `macd_fast`, `macd_slow`, `atr_trail` |
 
-Legacy strategies (`trend_following`, `mean_reversion`, `swing_momentum`, `pullback`, `breakout`, `accumulation`) are still available in the backtest engine for comparison but are no longer seeded as defaults.
+Legacy strategies are still available in the backtest engine for comparison but are no longer seeded as defaults.
 
 ### Technical Indicators
 
@@ -434,7 +434,7 @@ Request body:
   "end": "2025-01-01",
   "train_days": 14,
   "test_days": 3,
-  "strategy": "trend_following",
+  "strategy": "ema_trend",
   "exchange_fee": 0.04,
   "slippage": 0.05
 }
