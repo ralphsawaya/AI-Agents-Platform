@@ -14,21 +14,24 @@ KEY INDICATORS:
 CANDIDATE STRATEGIES: {candidates}
 
 STRATEGY DESCRIPTIONS:
-1. trend_following: EMA crossover with ADX filter. Best when ADX > 25 and clear directional momentum.
-2. mean_reversion: Bollinger Band bounce with RSI confirmation. Best when ADX < 20, price near BB extremes, RSI at oversold/overbought.
-3. scalping: VWAP + volume spike entries. Best during high volatility with strong volume, quick in-and-out trades.
+All strategies run on 4H Binance USDT-M Futures and support both LONG and SHORT positions.
+Each strategy uses only 2-3 parameters — deliberately simple to avoid overfitting.
+All have been walk-forward validated on 2+ years of BTC data.
 
-REGIME NOTES:
-- breakout: A fresh directional move is starting. trend_following captures the momentum after the break.
-- accumulation: Price is consolidating before a move. mean_reversion profits from the tight range while waiting for the breakout.
+1. ema_trend (4H): Pure EMA crossover trend strategy. LONG when fast EMA crosses above slow EMA, SHORT on opposite cross. ATR trailing stop exit. Flips directly between long and short. Walk-forward validated: OOS Sharpe 1.14, +60% return, 390% WF efficiency. Best in sustained trends (UPTREND / DOWNTREND).
+
+2. rsi_momentum (4H): RSI 50-line crossover with EMA trend confirmation. LONG when RSI crosses above 50 and price > EMA; SHORT when RSI crosses below 50 and price < EMA. ATR trailing stop exit. Walk-forward validated: OOS Sharpe 1.63, +101% return, 137% WF efficiency. Works across all regimes — the safest default.
+
+3. macd_trend (4H): MACD histogram sign-change with EMA trend filter. LONG when MACD histogram turns positive and price > EMA; SHORT on opposite. ATR trailing stop exit. OOS +8.3% return, 73% WF efficiency. Portfolio diversifier — uncorrelated to EMA/RSI signals.
 
 SELECTION CRITERIA:
 - Match strategy to regime strength and clarity
 - Consider regime transition risk (if confidence is borderline)
-- Prefer mean_reversion as the safe default when signals are mixed
-- Consider volume conditions (low volume favors mean_reversion)
-- During accumulation, mean_reversion benefits from the tight range but position sizing should be conservative
+- Prefer rsi_momentum as the safe default when signals are mixed
+- In strong trends (high ADX): ema_trend for maximum trend capture
+- macd_trend adds diversification when running alongside other strategies
+- Multiple strategies can coexist — select the one with highest edge for current conditions
 
 Respond in EXACTLY this format (2 lines):
-STRATEGY: <one of: trend_following, mean_reversion, scalping>
+STRATEGY: <one of: ema_trend, rsi_momentum, macd_trend>
 REASONING: <one paragraph explaining why this strategy fits the current conditions>"""

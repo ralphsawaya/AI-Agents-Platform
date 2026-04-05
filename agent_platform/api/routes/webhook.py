@@ -15,7 +15,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/webhook", tags=["webhook"])
 
 VALID_ACTIONS = {"buy", "sell", "close", "close_buy", "close_sell"}
-VALID_STRATEGIES = {"trend_following", "mean_reversion", "scalping"}
+VALID_STRATEGIES = {
+    "ema_trend", "rsi_momentum", "macd_trend",
+    "trend_following", "mean_reversion", "pullback", "breakout", "accumulation",
+}
 
 
 class TradingViewAlert(BaseModel):
@@ -27,12 +30,39 @@ class TradingViewAlert(BaseModel):
     time: str = ""
 
 
+EXIT_ACTIONS = {"sell", "close", "close_buy", "close_sell"}
+
+
 async def _get_active_strategy(db) -> str | None:
     """Return the currently active strategy name, or None."""
     doc = await db["strategy_selections"].find_one(
         sort=[("timestamp", -1)],
     )
     return doc["active_strategy"] if doc else None
+
+
+async def _strategy_has_open_position(db, strategy_name: str) -> bool:
+    """Check if a strategy has an open buy trade without a corresponding close.
+
+    Looks for a recent buy from this strategy that hasn't been followed by a
+    sell/close from the same strategy, indicating an open position.
+    """
+    last_buy = await db["trades"].find_one(
+        {"strategy_name": strategy_name, "side": "buy"},
+        sort=[("timestamp", -1)],
+    )
+    if not last_buy:
+        return False
+
+    last_sell = await db["trades"].find_one(
+        {
+            "strategy_name": strategy_name,
+            "side": {"$in": ["sell", "close", "close_buy", "close_sell"]},
+            "timestamp": {"$gte": last_buy["timestamp"]},
+        },
+        sort=[("timestamp", -1)],
+    )
+    return last_sell is None
 
 
 async def _count_today_trades(db) -> int:
@@ -107,6 +137,17 @@ async def tradingview_webhook(request: Request) -> dict[str, Any]:
     active_strategy = await _get_active_strategy(db)
     matched = active_strategy == alert.strategy_name
 
+    # Exit signals (sell/close) are allowed through if the strategy that
+    # opened the position is sending the close, even after a strategy switch.
+    exit_passthrough = False
+    if not matched and action in EXIT_ACTIONS:
+        if await _strategy_has_open_position(db, alert.strategy_name):
+            exit_passthrough = True
+            logger.info(
+                "Exit passthrough: '%s' has an open position — allowing %s signal despite active strategy being '%s'",
+                alert.strategy_name, action, active_strategy,
+            )
+
     try:
         price = float(alert.price)
     except (ValueError, TypeError):
@@ -117,15 +158,16 @@ async def tradingview_webhook(request: Request) -> dict[str, Any]:
         "action": action,
         "ticker": alert.ticker,
         "price": price,
-        "matched": matched,
+        "matched": matched or exit_passthrough,
         "active_strategy": active_strategy,
+        "exit_passthrough": exit_passthrough,
         "raw_time": alert.time,
         "timestamp": datetime.now(timezone.utc),
         "created_at": datetime.now(timezone.utc),
     }
     await db["trade_signals"].insert_one(signal_doc)
 
-    if not matched:
+    if not matched and not exit_passthrough:
         logger.info(
             "Signal from '%s' ignored — active strategy is '%s'",
             alert.strategy_name,

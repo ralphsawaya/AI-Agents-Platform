@@ -675,6 +675,127 @@ details[open] .bt-pine-chevron { transform: rotate(90deg); }
     font-weight: 600; font-family: inherit; cursor: pointer;
 }
 .bt-confirm-delete:hover { opacity: 0.85; }
+
+/* ── Section 5: Trade History ── */
+.bt-num-5 { background: #ec4899; color: #fff; }
+
+.bt-trade-tabs {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+.bt-trade-tab {
+    padding: 0.45rem 1rem;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.bt-trade-tab.active {
+    background: rgba(59,130,246,0.15);
+    border-color: rgba(59,130,246,0.4);
+    color: #60a5fa;
+}
+
+.bt-trade-summary {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+}
+
+.bt-ts-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    text-align: center;
+}
+
+.bt-ts-label {
+    font-size: 0.62rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+}
+
+.bt-ts-value {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-top: 0.15rem;
+}
+
+.bt-trade-table-wrap {
+    max-height: 420px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.bt-trade-table-wrap table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.76rem;
+}
+
+.bt-trade-table-wrap thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.bt-trade-table-wrap thead th {
+    background: var(--surface-2);
+    padding: 0.55rem 0.65rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+
+.bt-trade-table-wrap tbody tr {
+    border-bottom: 1px solid rgba(63,63,70,0.3);
+    transition: background 0.1s;
+}
+
+.bt-trade-table-wrap tbody tr:hover {
+    background: rgba(59,130,246,0.05);
+}
+
+.bt-trade-table-wrap td {
+    padding: 0.45rem 0.65rem;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.bt-dir-long {
+    color: #22c55e;
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+}
+
+.bt-dir-short {
+    color: #ef4444;
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+}
+
+.bt-pnl-pos { color: #22c55e; font-weight: 600; }
+.bt-pnl-neg { color: #ef4444; font-weight: 600; }
 </style>
 
 <div class="bt-layout">
@@ -706,11 +827,11 @@ details[open] .bt-pine-chevron { transform: rotate(90deg); }
         <div class="bt-field-row">
             <div class="bt-field">
                 <label>Start</label>
-                <input type="date" id="bt-start" value="2021-01-01">
+                <input type="date" id="bt-start">
             </div>
             <div class="bt-field">
                 <label>End</label>
-                <input type="date" id="bt-end" value="2026-01-01">
+                <input type="date" id="bt-end">
             </div>
         </div>
 
@@ -743,16 +864,16 @@ SL/TP : ATR-based dynamic levels</textarea>
         <div class="bt-code-box">
             <div class="bt-cost-row">
                 <span>Exchange fee :</span>
-                <input type="number" class="bt-inline-input" id="bt-fee" value="0.10" step="0.01" min="0" oninput="_bt_updateCosts()">
+                <input type="number" class="bt-inline-input" id="bt-fee" value="0.04" step="0.01" min="0" oninput="_bt_updateCosts()">
                 <span>% per trade</span>
             </div>
             <div class="bt-cost-row">
                 <span>Slippage&nbsp;&nbsp;&nbsp;&nbsp;:</span>
-                <input type="number" class="bt-inline-input" id="bt-slip" value="0.05" step="0.01" min="0" oninput="_bt_updateCosts()">
+                <input type="number" class="bt-inline-input" id="bt-slip" value="0.01" step="0.01" min="0" oninput="_bt_updateCosts()">
                 <span>% per trade</span>
             </div>
             <div class="bt-cost-row">
-                <span>Total cost&nbsp;&nbsp;: <strong id="bt-total-cost">0.15</strong> % per trade</span>
+                <span>Total cost&nbsp;&nbsp;: <strong id="bt-total-cost">0.05</strong> % per trade</span>
             </div>
         </div>
 
@@ -826,6 +947,17 @@ SL/TP : ATR-based dynamic levels</textarea>
                 <h2><span class="bt-num bt-num-4">4</span> Illusion vs. Reality Chart</h2>
                 <p>The blue line is what a retail trader would show investors. The orange line is what walk-forward analysis reveals. Shaded bands mark each blind out-of-sample test window.</p>
                 <div id="equity-chart"></div>
+            </div>
+
+            <div class="bt-section">
+                <h2><span class="bt-num bt-num-5">5</span> Trade History</h2>
+                <p>Every individual trade executed during the analysis. Switch between the in-sample (curve-fit) and out-of-sample (blind) trade lists.</p>
+                <div class="bt-trade-tabs">
+                    <button class="bt-trade-tab active" onclick="_bt_switchTradeTab('is')">In-Sample Trades</button>
+                    <button class="bt-trade-tab" onclick="_bt_switchTradeTab('oos')">Walk-Forward Trades</button>
+                </div>
+                <div id="trade-summary"></div>
+                <div id="trade-table-wrap" class="bt-trade-table-wrap"></div>
             </div>
         </div>
 
@@ -916,9 +1048,13 @@ SL/TP : ATR-based dynamic levels</textarea>
     var _btConfirmResolve = null;
 
     var _SLIDER_DEFAULTS = {
-        scalping:        {train: 14,  test: 3},
-        trend_following: {train: 90,  test: 21},
-        mean_reversion:  {train: 60,  test: 14},
+        ema_trend:        {train: 180, test: 30},
+        rsi_momentum:     {train: 180, test: 30},
+        macd_trend:       {train: 180, test: 30},
+        pullback:         {train: 21,  test: 5},
+        trend_following:  {train: 90,  test: 21},
+        mean_reversion:   {train: 45,  test: 10},
+        swing_momentum:   {train: 90,  test: 21},
     };
 
     function _getCurrentStrategy() {
@@ -991,8 +1127,8 @@ SL/TP : ATR-based dynamic levels</textarea>
             train_days:   parseInt(document.getElementById('bt-train').value),
             test_days:    parseInt(document.getElementById('bt-test').value),
             strategy:     document.getElementById('bt-strategy').value,
-            exchange_fee: parseFloat(document.getElementById('bt-fee').value) || 0.1,
-            slippage:     parseFloat(document.getElementById('bt-slip').value) || 0.05,
+            exchange_fee: parseFloat(document.getElementById('bt-fee').value) || 0.04,
+            slippage:     parseFloat(document.getElementById('bt-slip').value) || 0.01,
         };
     }
 
@@ -1161,15 +1297,29 @@ SL/TP : ATR-based dynamic levels</textarea>
 
         var stratId = document.getElementById('bt-strategy').value;
         var paramStr;
-        if (stratId === 'scalping') {
-            paramStr = 'EMA(' + f.params.ema_len + '), Vol(' + f.params.vol_thresh +
-                       '), SL(' + f.params.atr_sl + '), TP(' + f.params.atr_tp + ')';
+        if (stratId === 'ema_trend') {
+            paramStr = 'EMA_F(' + f.params.ema_fast + '), EMA_S(' + f.params.ema_slow +
+                       '), Trail(' + f.params.atr_trail + ')';
+        } else if (stratId === 'rsi_momentum') {
+            paramStr = 'RSI(' + f.params.rsi_len + '), EMA(' + f.params.ema_len +
+                       '), Trail(' + f.params.atr_trail + ')';
+        } else if (stratId === 'macd_trend') {
+            paramStr = 'MACD_F(' + f.params.macd_fast + '), MACD_S(' + f.params.macd_slow +
+                       '), Trail(' + f.params.atr_trail + ')';
+        } else if (stratId === 'pullback') {
+            paramStr = 'Slow(' + f.params.ema_slow + '), Fast(' + f.params.ema_fast +
+                       '), Vol(' + f.params.vol_thresh + '), Trail(' + f.params.atr_trail + ')';
         } else if (stratId === 'trend_following') {
             paramStr = 'Fast(' + f.params.ema_fast + '), Mid(' + f.params.ema_mid +
-                       '), ADX(' + f.params.adx_thresh + '), Trail(' + f.params.atr_trail + ')';
+                       '), Slow(' + (f.params.ema_slow || 50) + '), ADX(' + f.params.adx_thresh +
+                       '), Trail(' + f.params.atr_trail + ')';
+        } else if (stratId === 'swing_momentum') {
+            paramStr = 'RSI(' + f.params.rsi_len + '), EMA(' + f.params.ema_len +
+                       '), Vol(' + f.params.vol_thresh + '), Trail(' + f.params.atr_trail + ')';
         } else {
             paramStr = 'BB(' + f.params.bb_len + ',' + f.params.bb_std +
-                       '), RSI(' + f.params.rsi_os + '/' + f.params.rsi_ob + ')';
+                       '), RSI(' + f.params.rsi_os + '/' + f.params.rsi_ob +
+                       '), Vol×' + (f.params.vol_mult || 1.0) + ', SL×' + (f.params.sl_mult || 1.5);
         }
 
         var retClr = f.oos_return >= 0 ? '#22c55e' : '#ef4444';
@@ -1190,7 +1340,10 @@ SL/TP : ATR-based dynamic levels</textarea>
         log.scrollTop = log.scrollHeight;
     }
 
+    var _btLastCompleteData = null;
+
     function _onComplete(data) {
+        _btLastCompleteData = data;
         document.getElementById('bt-progress').style.display = 'none';
         document.getElementById('bt-header').style.display = 'block';
         document.getElementById('bt-results').style.display = 'block';
@@ -1199,6 +1352,7 @@ SL/TP : ATR-based dynamic levels</textarea>
         _renderParamTable(data);
         _renderMetrics(data);
         _renderEquity(data);
+        _bt_switchTradeTab('is');
     }
 
     function _renderTimeline(data) {
@@ -1243,17 +1397,34 @@ SL/TP : ATR-based dynamic levels</textarea>
         var s = data.strategy;
         var folds = data.folds;
         var hdr;
-        if (s === 'scalping') {
+        if (s === 'ema_trend') {
             hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-                  '<th>EMA Len</th><th>Vol Thresh</th><th>ATR SL</th><th>ATR TP</th>' +
+                  '<th>EMA Fast</th><th>EMA Slow</th><th>ATR Trail</th>' +
+                  '<th>Train Sharpe</th><th>OOS Return</th>';
+        } else if (s === 'rsi_momentum') {
+            hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
+                  '<th>RSI Len</th><th>EMA Len</th><th>ATR Trail</th>' +
+                  '<th>Train Sharpe</th><th>OOS Return</th>';
+        } else if (s === 'macd_trend') {
+            hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
+                  '<th>MACD Fast</th><th>MACD Slow</th><th>ATR Trail</th>' +
+                  '<th>Train Sharpe</th><th>OOS Return</th>';
+        } else if (s === 'pullback') {
+            hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
+                  '<th>EMA Slow</th><th>EMA Fast</th><th>Vol Thresh</th><th>ATR Trail</th>' +
                   '<th>Train Sharpe</th><th>OOS Return</th>';
         } else if (s === 'trend_following') {
             hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
-                  '<th>EMA Fast</th><th>EMA Mid</th><th>ADX Thresh</th><th>ATR Trail</th>' +
+                  '<th>EMA Fast</th><th>EMA Mid</th><th>EMA Slow</th><th>ADX Thresh</th><th>ATR Trail</th>' +
+                  '<th>Train Sharpe</th><th>OOS Return</th>';
+        } else if (s === 'swing_momentum') {
+            hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
+                  '<th>RSI Len</th><th>EMA Len</th><th>Vol Thresh</th><th>ATR Trail</th>' +
                   '<th>Train Sharpe</th><th>OOS Return</th>';
         } else {
             hdr = '<th>Fold</th><th>Train Window</th><th>Blind Test Window</th>' +
                   '<th>BB Len</th><th>BB Std</th><th>RSI OS</th><th>RSI OB</th>' +
+                  '<th>Vol×</th><th>SL×</th>' +
                   '<th>Train Sharpe</th><th>OOS Return</th>';
         }
 
@@ -1261,15 +1432,29 @@ SL/TP : ATR-based dynamic levels</textarea>
             var rc = f.oos_return >= 0 ? 'color:#22c55e' : 'color:#ef4444';
             var sign = f.oos_return > 0 ? '+' : '';
             var pc;
-            if (s === 'scalping') {
-                pc = '<td>' + f.params.ema_len + '</td><td>' + f.params.vol_thresh +
-                     '</td><td>' + f.params.atr_sl + '</td><td>' + f.params.atr_tp + '</td>';
+            if (s === 'ema_trend') {
+                pc = '<td>' + f.params.ema_fast + '</td><td>' + f.params.ema_slow +
+                     '</td><td>' + f.params.atr_trail + '</td>';
+            } else if (s === 'rsi_momentum') {
+                pc = '<td>' + f.params.rsi_len + '</td><td>' + f.params.ema_len +
+                     '</td><td>' + f.params.atr_trail + '</td>';
+            } else if (s === 'macd_trend') {
+                pc = '<td>' + f.params.macd_fast + '</td><td>' + f.params.macd_slow +
+                     '</td><td>' + f.params.atr_trail + '</td>';
+            } else if (s === 'pullback') {
+                pc = '<td>' + f.params.ema_slow + '</td><td>' + f.params.ema_fast +
+                     '</td><td>' + f.params.vol_thresh + '</td><td>' + f.params.atr_trail + '</td>';
             } else if (s === 'trend_following') {
                 pc = '<td>' + f.params.ema_fast + '</td><td>' + f.params.ema_mid +
-                     '</td><td>' + f.params.adx_thresh + '</td><td>' + f.params.atr_trail + '</td>';
+                     '</td><td>' + (f.params.ema_slow || 50) + '</td><td>' + f.params.adx_thresh +
+                     '</td><td>' + f.params.atr_trail + '</td>';
+            } else if (s === 'swing_momentum') {
+                pc = '<td>' + f.params.rsi_len + '</td><td>' + f.params.ema_len +
+                     '</td><td>' + f.params.vol_thresh + '</td><td>' + f.params.atr_trail + '</td>';
             } else {
                 pc = '<td>' + f.params.bb_len + '</td><td>' + f.params.bb_std +
-                     '</td><td>' + f.params.rsi_os + '</td><td>' + f.params.rsi_ob + '</td>';
+                     '</td><td>' + f.params.rsi_os + '</td><td>' + f.params.rsi_ob +
+                     '</td><td>' + (f.params.vol_mult || 1.0) + '</td><td>' + (f.params.sl_mult || 1.5) + '</td>';
             }
             return '<tr><td>Fold ' + (i+1) + '</td>' +
                    '<td>' + f.train_start + ' to ' + f.train_end + '</td>' +
@@ -1305,11 +1490,11 @@ SL/TP : ATR-based dynamic levels</textarea>
             '<div class="bt-comparison">' +
                 '<div class="bt-comp-col">' +
                     '<div class="bt-comp-header is-header"><div class="bt-ch-title">Retail Backtest</div><div class="bt-ch-sub">In-Sample (Curve-Fit)</div></div>' +
-                    '<div class="bt-metric-grid">' + mc('TOTAL RETURN', ism.total_return, '%', true) + mc('SHARPE RATIO', ism.sharpe, '', false) + mc('MAX DRAWDOWN', ism.max_drawdown, '%', true) + mc('TRADES', ism.trades, '', false) + '</div>' +
+                    '<div class="bt-metric-grid">' + mc('TOTAL RETURN', ism.total_return, '%', true) + mc('SHARPE RATIO', ism.sharpe, '', false) + mc('MAX DRAWDOWN', ism.max_drawdown, '%', true) + mc('TRADES', ism.trades, '', false) + mc('LONGS', ism.longs || 0, '', false) + mc('SHORTS', ism.shorts || 0, '', false) + '</div>' +
                 '</div>' +
                 '<div class="bt-comp-col">' +
                     '<div class="bt-comp-header oos-header"><div class="bt-ch-title">Walk-Forward</div><div class="bt-ch-sub">Out-of-Sample (Blind)</div></div>' +
-                    '<div class="bt-metric-grid">' + mc('TOTAL RETURN', osm.total_return, '%', true) + mc('SHARPE RATIO', osm.sharpe, '', false) + mc('MAX DRAWDOWN', osm.max_drawdown, '%', true) + mc('TRADES', osm.trades, '', false) + '</div>' +
+                    '<div class="bt-metric-grid">' + mc('TOTAL RETURN', osm.total_return, '%', true) + mc('SHARPE RATIO', osm.sharpe, '', false) + mc('MAX DRAWDOWN', osm.max_drawdown, '%', true) + mc('TRADES', osm.trades, '', false) + mc('LONGS', osm.longs || 0, '', false) + mc('SHORTS', osm.shorts || 0, '', false) + '</div>' +
                 '</div>' +
             '</div>';
 
@@ -1345,6 +1530,73 @@ SL/TP : ATR-based dynamic levels</textarea>
         }, {displayModeBar:false, responsive:true});
     }
 
+    /* ── 5. Trade History ── */
+
+    window._bt_switchTradeTab = function(tab) {
+        if (!_btLastCompleteData) return;
+        var tabs = document.querySelectorAll('.bt-trade-tab');
+        tabs.forEach(function(t) { t.classList.remove('active'); });
+        if (tab === 'is') { tabs[0].classList.add('active'); }
+        else { tabs[1].classList.add('active'); }
+        var trades = tab === 'is' ? (_btLastCompleteData.is_trades_list || []) : (_btLastCompleteData.oos_trades_list || []);
+        _renderTradeHistory(trades);
+    };
+
+    function _renderTradeHistory(trades) {
+        var total = trades.length;
+        if (total === 0) {
+            document.getElementById('trade-summary').innerHTML = '';
+            document.getElementById('trade-table-wrap').innerHTML =
+                '<p style="padding:1.5rem;color:var(--text-dim);text-align:center">No trades recorded.</p>';
+            return;
+        }
+
+        var winners = trades.filter(function(t) { return t.pnl > 0; }).length;
+        var losers  = trades.filter(function(t) { return t.pnl < 0; }).length;
+        var winRate = (winners / total * 100).toFixed(1);
+        var avgPnl  = (trades.reduce(function(s, t) { return s + t.pnl; }, 0) / total).toFixed(2);
+        var bestT   = trades.reduce(function(a, b) { return a.pnl > b.pnl ? a : b; });
+        var worstT  = trades.reduce(function(a, b) { return a.pnl < b.pnl ? a : b; });
+        var longs   = trades.filter(function(t) { return t.dir === 'LONG'; }).length;
+        var shorts  = total - longs;
+
+        function sc(label, val, clr) {
+            return '<div class="bt-ts-card"><div class="bt-ts-label">' + label +
+                   '</div><div class="bt-ts-value" style="color:' + clr + '">' + val + '</div></div>';
+        }
+
+        document.getElementById('trade-summary').innerHTML =
+            '<div class="bt-trade-summary">' +
+                sc('Win Rate', winRate + '%', parseFloat(winRate) >= 50 ? '#22c55e' : '#ef4444') +
+                sc('Avg P&L', (avgPnl > 0 ? '+' : '') + avgPnl + '%', avgPnl >= 0 ? '#22c55e' : '#ef4444') +
+                sc('Best Trade', '+' + bestT.pnl + '%', '#22c55e') +
+                sc('Worst Trade', worstT.pnl + '%', '#ef4444') +
+                sc('Long / Short', longs + ' / ' + shorts, '#fafafa') +
+            '</div>';
+
+        var rows = trades.map(function(t, i) {
+            var dirCls = t.dir === 'LONG' ? 'bt-dir-long' : 'bt-dir-short';
+            var pnlCls = t.pnl >= 0 ? 'bt-pnl-pos' : 'bt-pnl-neg';
+            var sign = t.pnl > 0 ? '+' : '';
+            return '<tr>' +
+                '<td style="color:var(--text-dim)">' + (i + 1) + '</td>' +
+                '<td><span class="' + dirCls + '">' + t.dir + '</span></td>' +
+                '<td>' + t.entry_date + '</td>' +
+                '<td>$' + t.entry.toLocaleString() + '</td>' +
+                '<td>' + t.exit_date + '</td>' +
+                '<td>$' + t.exit.toLocaleString() + '</td>' +
+                '<td class="' + pnlCls + '">' + sign + t.pnl + '%</td>' +
+                '<td style="color:var(--text-dim)">' + t.bars + '</td>' +
+            '</tr>';
+        }).join('');
+
+        document.getElementById('trade-table-wrap').innerHTML =
+            '<table><thead><tr>' +
+                '<th>#</th><th>Direction</th><th>Entry Date</th><th>Entry Price</th>' +
+                '<th>Exit Date</th><th>Exit Price</th><th>P&L</th><th>Bars</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>';
+    }
+
     /* ── Init ── */
 
     async function _loadStrategies() {
@@ -1359,6 +1611,10 @@ SL/TP : ATR-based dynamic levels</textarea>
         }
     }
 
+    var _now = new Date();
+    var _y = _now.getFullYear(), _m = String(_now.getMonth()+1).padStart(2,'0'), _d = String(_now.getDate()).padStart(2,'0');
+    document.getElementById('bt-end').value = _y+'-'+_m+'-'+_d;
+    document.getElementById('bt-start').value = (_y-2)+'-'+_m+'-'+_d;
     document.querySelectorAll('.bt-layout input[type="range"]').forEach(_bt_updateSlider);
     _loadStrategies();
 })();

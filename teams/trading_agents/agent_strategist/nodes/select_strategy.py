@@ -1,4 +1,4 @@
-"""Select the best strategy, using Gemini for edge cases."""
+"""Select the best strategy from candidates using LLM for edge cases."""
 
 from shared.llm import get_llm
 from shared.logger import get_logger
@@ -6,7 +6,7 @@ from agent_strategist.prompts.prompt_templates import STRATEGY_SELECTION_PROMPT
 
 logger = get_logger("strategist.select_strategy")
 
-VALID_STRATEGIES = {"trend_following", "mean_reversion", "scalping"}
+VALID_STRATEGIES = {"ema_trend", "rsi_momentum", "macd_trend"}
 
 
 def select_strategy(state: dict) -> dict:
@@ -15,7 +15,6 @@ def select_strategy(state: dict) -> dict:
     confidence = state.get("confidence", 0.0)
     indicators = state.get("indicators", {})
 
-    # Fast path: single candidate with high confidence
     if len(candidates) == 1 and confidence >= 0.7:
         selected = candidates[0]
         reasoning = f"Clear {regime} regime with {confidence:.0%} confidence — {selected} is the optimal strategy."
@@ -26,7 +25,6 @@ def select_strategy(state: dict) -> dict:
             "status": "strategy_selected",
         }
 
-    # Use Gemini for ambiguous / multi-candidate scenarios
     llm = get_llm()
     prompt = STRATEGY_SELECTION_PROMPT.format(
         regime=regime,
@@ -39,7 +37,7 @@ def select_strategy(state: dict) -> dict:
         volume_ratio=indicators.get("volume_ratio", 0),
     )
 
-    logger.info("Consulting Gemini for strategy selection…")
+    logger.info("Consulting LLM for strategy selection...")
     response = llm.invoke(prompt)
 
     selected, reasoning = _parse_response(response, candidates)
@@ -53,9 +51,8 @@ def select_strategy(state: dict) -> dict:
 
 
 def _parse_response(response: str, candidates: list[str]) -> tuple[str, str]:
-    """Extract selected strategy and reasoning from Gemini's response."""
     lines = response.strip().split("\n")
-    selected = candidates[0] if candidates else "mean_reversion"
+    selected = candidates[0] if candidates else "rsi_momentum"
     reasoning = response[:500]
 
     for line in lines:

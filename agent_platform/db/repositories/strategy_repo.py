@@ -18,74 +18,81 @@ def _read_pine(filename: str) -> str:
         return ""
 
 
-# Seeded strategies — only used to populate MongoDB on startup.
-# `_builtin_id` is an internal upsert key so restarts don't create duplicates.
 _SEED_META: list[dict] = [
     {
-        "_builtin_id": "scalping",
-        "name": "Scalping (EMA + VWAP + Volume)",
-        "timeframe": "15m",
-        "description": (
-            "Entry on price > VWAP AND price > EMA with volume spike and RSI > 50. "
-            "ATR-based stop-loss and take-profit."
-        ),
-        "strategy_rules": (
-            "LONG  : price > VWAP AND price > EMA\n"
-            "        AND volume > volMA \u00d7 threshold\n"
-            "        AND RSI > 50\n"
-            "EXIT  : price < VWAP OR price < EMA\n"
-            "SL/TP : ATR-based dynamic levels"
-        ),
-        "pine_file": "scalping.pine",
-    },
-    {
-        "_builtin_id": "trend_following",
-        "name": "Trend Following (EMA Cross + ADX)",
+        "_builtin_id": "ema_trend",
+        "name": "EMA Trend (4H) — WF Validated",
         "timeframe": "4h",
         "description": (
-            "Bullish EMA crossover + ADX above threshold + MACD histogram confirmation. "
-            "ATR trailing stop exit."
+            "Pure EMA crossover trend strategy with ATR trailing stop. "
+            "Only 3 parameters (ema_fast, ema_slow, atr_trail). Walk-forward "
+            "validated: OOS Sharpe 1.14, +60.4% return, positive all years. "
+            "390% WF efficiency — anti-fragile."
         ),
         "strategy_rules": (
-            "LONG  : EMA(fast) crosses above EMA(mid)\n"
-            "        AND ADX > threshold\n"
-            "        AND MACD histogram > 0\n"
-            "EXIT  : bearish cross OR trailing stop hit\n"
-            "TRAIL : high \u2212 ATR \u00d7 multiplier"
+            "LONG  : EMA(fast) crosses above EMA(slow)\n"
+            "EXIT  : ATR trailing stop OR opposite EMA cross\n"
+            "SHORT : EMA(fast) crosses below EMA(slow)\n"
+            "EXIT  : ATR trailing stop OR opposite EMA cross\n"
+            "NOTE  : Flips directly from long to short on cross"
         ),
-        "pine_file": "trend_following.pine",
+        "pine_file": "ema_trend.pine",
     },
     {
-        "_builtin_id": "mean_reversion",
-        "name": "Mean Reversion (BB + RSI)",
+        "_builtin_id": "rsi_momentum",
+        "name": "RSI Momentum (4H) — WF Validated",
         "timeframe": "4h",
         "description": (
-            "Buy at lower Bollinger Band when RSI is oversold and volume confirms. "
-            "Exit at middle or upper BB."
+            "RSI 50-line crossover with EMA trend confirmation. "
+            "Only 3 parameters (rsi_len, ema_len, atr_trail). Walk-forward "
+            "validated: OOS Sharpe 1.63, +101.0% return, positive all years. "
+            "137% WF efficiency."
         ),
         "strategy_rules": (
-            "LONG  : price \u2264 lower BB\n"
-            "        AND RSI < oversold level\n"
-            "        AND volume > volMA \u00d7 1.5\n"
-            "EXIT  : price \u2265 upper BB AND RSI > overbought\n"
-            "TP    : price reaches middle BB (mean)\n"
-            "SL    : entry \u2212 ATR \u00d7 1.5"
+            "LONG  : RSI crosses above 50 AND close > EMA\n"
+            "SHORT : RSI crosses below 50 AND close < EMA\n"
+            "EXIT  : ATR trailing stop OR opposite RSI cross"
         ),
-        "pine_file": "mean_reversion.pine",
+        "pine_file": "rsi_momentum.pine",
+    },
+    {
+        "_builtin_id": "macd_trend",
+        "name": "MACD Trend (4H) — Portfolio Diversifier",
+        "timeframe": "4h",
+        "description": (
+            "MACD histogram sign-change with EMA trend filter. "
+            "Only 3 parameters (macd_fast, macd_slow, atr_trail). "
+            "OOS +8.3% return, 73% WF efficiency. Adds portfolio diversification."
+        ),
+        "strategy_rules": (
+            "LONG  : MACD histogram turns positive AND close > EMA(slow)\n"
+            "SHORT : MACD histogram turns negative AND close < EMA(slow)\n"
+            "EXIT  : ATR trailing stop OR opposite MACD cross"
+        ),
+        "pine_file": "macd_trend.pine",
     },
 ]
 
 _COLLECTION = "backtest_strategies"
 
+_DEPRECATED_BUILTIN_IDS = [
+    "scalping", "breakout", "accumulation",
+    "trend_following", "mean_reversion", "swing_momentum", "pullback",
+]
+
 
 async def seed_builtin_strategies() -> None:
-    """Upsert the three default strategies on startup.
+    """Upsert the four default strategies on startup and clean deprecated ones.
 
     The `_builtin_id` field is an internal seeding key only — it is NOT
     exposed through the API and carries no special protection.
     """
     db = get_database()
     now = datetime.now(timezone.utc)
+
+    for old_id in _DEPRECATED_BUILTIN_IDS:
+        await db[_COLLECTION].delete_many({"_builtin_id": old_id})
+
     for meta in _SEED_META:
         pine_script = _read_pine(meta["pine_file"])
         await db[_COLLECTION].update_one(
@@ -154,7 +161,6 @@ async def delete_strategy(strategy_id: str) -> bool:
     user-created strategies use their MongoDB ObjectId string.
     """
     db = get_database()
-    # Try ObjectId first (user-created strategies)
     try:
         oid = ObjectId(strategy_id)
         result = await db[_COLLECTION].delete_one({"_id": oid})
@@ -162,6 +168,5 @@ async def delete_strategy(strategy_id: str) -> bool:
             return True
     except Exception:
         pass
-    # Fall back to _builtin_id (seeded strategies)
     result = await db[_COLLECTION].delete_one({"_builtin_id": strategy_id})
     return result.deleted_count > 0

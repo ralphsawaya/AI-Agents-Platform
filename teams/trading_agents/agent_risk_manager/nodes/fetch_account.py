@@ -1,4 +1,8 @@
-"""Fetch current Binance account state."""
+"""Fetch current Binance account state.
+
+ATR is fetched on the strategy's native timeframe so that stop-loss
+distances are proportional to the candles the Pine Script actually trades.
+"""
 
 from shared.binance_client import (
     get_account_balance, get_current_price, get_open_orders, get_klines,
@@ -9,6 +13,13 @@ from shared.logger import get_logger
 
 logger = get_logger("risk_manager.fetch_account")
 
+STRATEGY_TIMEFRAME = {
+    "ema_trend": "4h",
+    "rsi_momentum": "4h",
+    "macd_trend": "4h",
+}
+DEFAULT_TIMEFRAME = "4h"
+
 
 def fetch_account(state: dict) -> dict:
     try:
@@ -17,18 +28,20 @@ def fetch_account(state: dict) -> dict:
         current_price = get_current_price(TRADING_PAIR)
         open_orders = get_open_orders(TRADING_PAIR)
 
-        # Current exposure in USDT
         current_exposure = btc_balance * current_price
 
-        # Fetch ATR for stop-loss calculation
-        klines = get_klines(symbol=TRADING_PAIR, interval="4h", limit=20)
+        signal = state.get("signal", {})
+        strategy_name = signal.get("strategy_name", "")
+        interval = STRATEGY_TIMEFRAME.get(strategy_name, DEFAULT_TIMEFRAME)
+
+        klines = get_klines(symbol=TRADING_PAIR, interval=interval, limit=20)
         df = klines_to_dataframe(klines)
         indicators = compute_all_indicators(df)
         atr = indicators.atr
 
         logger.info(
-            "Account: %.2f USDT, %.8f BTC (%.2f USDT), %d open orders, ATR=%.2f",
-            usdt_balance, btc_balance, current_exposure, len(open_orders), atr,
+            "Account: %.2f USDT, %.8f BTC (%.2f USDT), %d open orders, ATR(%s)=%.2f",
+            usdt_balance, btc_balance, current_exposure, len(open_orders), interval, atr,
         )
 
         return {

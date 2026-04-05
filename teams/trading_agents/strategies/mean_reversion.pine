@@ -1,20 +1,22 @@
 // This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
-// © AI-Agents-Platform — Mean Reversion Strategy
-// Designed for BTC/USDT on 4H timeframe
-// Webhook-enabled for automated trading via TradingView alerts
+// © AI-Agents-Platform — Mean Reversion Strategy (v2)
+// Designed for BTC/USDT on 2H timeframe (Binance USDT-M Futures)
+// Bidirectional: BB bounce with RSI + volume + internal ADX ceiling filter
 
 //@version=6
-strategy("Mean Reversion [AI-Agents]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.1)
+strategy("Mean Reversion [AI-Agents]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.04)
 
 // ── Inputs ──────────────────────────────────────────────────────────
 bbLen        = input.int(20,    "Bollinger Band Length", minval=5)
 bbStd        = input.float(2.0, "Bollinger Band Std Dev", minval=0.5, step=0.5)
 rsiLen       = input.int(14,    "RSI Length",            minval=2)
-rsiOversold  = input.float(30.0, "RSI Oversold Level",  minval=10.0, step=5.0)
-rsiOverbought = input.float(70.0, "RSI Overbought Level", minval=50.0, step=5.0)
-volMultiple  = input.float(1.5,  "Volume Confirmation Multiple", minval=1.0, step=0.1)
+rsiOversold  = input.float(30.0, "RSI Oversold Level",  minval=10.0, step=2.0)
+rsiOverbought = input.float(70.0, "RSI Overbought Level", minval=50.0, step=2.0)
+volMultiple  = input.float(1.0,  "Volume Confirmation Multiple", minval=0.5, step=0.1)
 atrLen       = input.int(14,    "ATR Length",            minval=1)
-atrSlMult    = input.float(1.5, "ATR Stop Loss Multiple", minval=0.5, step=0.5)
+atrSlMult    = input.float(1.5, "ATR Stop Loss Multiple", minval=0.5, step=0.1)
+adxMax       = input.float(25.0, "Max ADX (ranging filter)", minval=10.0, step=1.0, tooltip="Only trade when ADX < this value (ensures ranging market)")
+maxHoldBars  = input.int(16,    "Max Hold Bars",         minval=5, tooltip="Force exit after N bars to prevent holding through regime change")
 webhookSecret = input.string("", "Webhook Secret", tooltip="Shared secret for webhook authentication")
 
 // ── Calculations ────────────────────────────────────────────────────
@@ -22,41 +24,54 @@ webhookSecret = input.string("", "Webhook Secret", tooltip="Shared secret for we
 rsi    = ta.rsi(close, rsiLen)
 atr    = ta.atr(atrLen)
 volMA  = ta.sma(volume, 20)
+[diPlus, diMinus, adxVal] = ta.dmi(14, 14)
 
-// Volume confirmation
 highVolume = volume > volMA * volMultiple
+adxOk      = adxVal < adxMax
 
-// ── Conditions ──────────────────────────────────────────────────────
-// Buy: price touches/crosses below lower BB + RSI oversold + volume confirmation
-buyCondition = close <= bbLower and rsi < rsiOversold and highVolume
+// ── Hold Time Tracking ─────────────────────────────────────────────
+var int barsHeld = 0
+if strategy.position_size != 0
+    barsHeld := barsHeld + 1
+else
+    barsHeld := 0
 
-// Sell: price touches/crosses above upper BB + RSI overbought
-sellCondition = close >= bbUpper and rsi > rsiOverbought
+// ── Stop Loss Tracking ─────────────────────────────────────────────
+var float slLong  = na
+var float slShort = na
 
-// Take profit at mean (middle BB)
-tpAtMean = strategy.position_size > 0 and close >= bbMiddle
-
-// Stop loss
-var float stopLossLevel = na
-if strategy.position_size > 0 and strategy.position_size[1] <= 0
-    stopLossLevel := strategy.position_avg_price - atr * atrSlMult
-else if strategy.position_size <= 0
-    stopLossLevel := na
-
-stopHit = strategy.position_size > 0 and not na(stopLossLevel) and close < stopLossLevel
+// ── Entry Conditions ────────────────────────────────────────────────
+longEntry  = close <= bbLower and rsi < rsiOversold and highVolume and adxOk
+shortEntry = close >= bbUpper and rsi > rsiOverbought and highVolume and adxOk
 
 // ── Strategy Execution ──────────────────────────────────────────────
-if buyCondition and strategy.position_size <= 0
-    strategy.entry("MR Long", strategy.long, alert_message='{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"buy","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+alertMsg(action) => '{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"' + action + '","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}'
 
-if sellCondition and strategy.position_size > 0
-    strategy.close("MR Long", comment="Overbought Exit", alert_message='{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"sell","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+if longEntry and strategy.position_size <= 0
+    strategy.entry("MR Long", strategy.long, alert_message=alertMsg("buy"))
+    slLong := close - atr * atrSlMult
 
-if tpAtMean
-    strategy.close("MR Long", comment="Mean TP", alert_message='{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"sell","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+if shortEntry and strategy.position_size >= 0
+    strategy.entry("MR Short", strategy.short, alert_message=alertMsg("sell"))
+    slShort := close + atr * atrSlMult
 
-if stopHit
-    strategy.close("MR Long", comment="Stop Loss", alert_message='{"secret":"' + webhookSecret + '","strategy_name":"mean_reversion","action":"sell","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}')
+// Long exits: mean TP, SL, or max hold
+if strategy.position_size > 0
+    if close >= bbMiddle
+        strategy.close("MR Long", comment="Mean TP", alert_message=alertMsg("close_buy"))
+    else if not na(slLong) and close < slLong
+        strategy.close("MR Long", comment="Stop Loss", alert_message=alertMsg("close_buy"))
+    else if barsHeld >= maxHoldBars
+        strategy.close("MR Long", comment="Max Hold", alert_message=alertMsg("close_buy"))
+
+// Short exits: mean TP, SL, or max hold
+if strategy.position_size < 0
+    if close <= bbMiddle
+        strategy.close("MR Short", comment="Mean TP", alert_message=alertMsg("close_sell"))
+    else if not na(slShort) and close > slShort
+        strategy.close("MR Short", comment="Stop Loss", alert_message=alertMsg("close_sell"))
+    else if barsHeld >= maxHoldBars
+        strategy.close("MR Short", comment="Max Hold", alert_message=alertMsg("close_sell"))
 
 // ── Plots ───────────────────────────────────────────────────────────
 plot(bbUpper,  "BB Upper",  color=color.red,    linewidth=1)
@@ -64,7 +79,8 @@ plot(bbMiddle, "BB Middle", color=color.gray,   linewidth=1)
 plot(bbLower,  "BB Lower",  color=color.green,  linewidth=1)
 fill(plot(bbUpper), plot(bbLower), color=color.new(color.blue, 95), title="BB Fill")
 
-plot(strategy.position_size > 0 ? stopLossLevel : na, "Stop Loss", color=color.red, style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size > 0 ? slLong : na, "SL Long", color=color.red, style=plot.style_linebr, linewidth=1)
+plot(strategy.position_size < 0 ? slShort : na, "SL Short", color=color.red, style=plot.style_linebr, linewidth=1)
 
-bgcolor(buyCondition  ? color.new(color.green, 90) : na, title="Buy Signal")
-bgcolor(sellCondition ? color.new(color.red, 90)   : na, title="Sell Signal")
+bgcolor(longEntry  ? color.new(color.green, 90) : na, title="Long Signal")
+bgcolor(shortEntry ? color.new(color.red, 90)   : na, title="Short Signal")

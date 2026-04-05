@@ -1,6 +1,6 @@
 # Trading Agents Team
 
-An autonomous multi-agent trading system that connects TradingView Pine Script strategies to Binance Spot, using a team of four specialized AI agents to continuously evaluate BTC/USDT and hot-swap strategies without manual input.
+An autonomous multi-agent trading system that connects TradingView Pine Script strategies to **Binance USDT-M Futures**, using a team of four specialized AI agents to continuously evaluate BTC/USDT and hot-swap strategies without manual input.
 
 ## The Problem
 
@@ -19,21 +19,17 @@ Analyst --> Strategist --> END
 ```
 
 1. **The Analyst** pulls 4H and 1H BTC/USDT candles from Binance, computes technical indicators (ADX, ATR, Bollinger Bands, EMAs, RSI, MACD, volume ratios), and asks the configured LLM to classify the current market regime as one of:
-   - `trending_up` — strong uptrend, ADX > 25, EMA alignment bullish
-   - `trending_down` — strong downtrend, ADX > 25, EMA alignment bearish
-   - `ranging` — low ADX, narrow Bollinger Bands, sideways price action
-   - `high_volatility` — ATR spike, wide Bollinger Bands, unstable direction
-   - `breakout` — price breaking out of consolidation with rising ADX and volume surge
-   - `accumulation` — tight consolidation with very narrow Bollinger Bands and building volume, pre-breakout phase
+   - `uptrend` — sustained directional move upward, ADX > 22, triple EMA alignment bullish, positive EMA slope
+   - `downtrend` — sustained directional move downward, ADX > 22, triple EMA alignment bearish, negative EMA slope
+   - `ranging` — sideways/mean-reverting market, low directional bias, ADX < 22 or EMAs not aligned
+   - `volatile_breakout` — high-volatility expansion from consolidation, ATR > 2.5%, wide BB, volume surge
 
-2. **The Strategist** maps the regime to the best-fit Pine Script strategy:
-   - Trending regimes --> `trend_following`
-   - Ranging --> `mean_reversion`
-   - High volatility --> `scalping`
-   - Breakout --> `trend_following` (ride the momentum after the break)
-   - Accumulation --> `mean_reversion` (profit from the tight range while awaiting breakout)
+2. **The Strategist** maps the regime to compatible strategies (multiple can be active):
+   - Uptrend / Downtrend --> `ema_trend`, `rsi_momentum`, `macd_trend`
+   - Ranging --> `rsi_momentum`
+   - Volatile breakout --> `rsi_momentum`, `macd_trend`
 
-   For edge cases (low confidence, regime transitions), the LLM provides a second opinion before committing. The active strategy is stored in MongoDB.
+   All three strategies have been walk-forward validated on 2+ years of BTC data with out-of-sample profitability. For edge cases (low confidence, regime transitions), the LLM provides a second opinion before committing. The active strategy is stored in MongoDB.
 
 ### Pipeline 2 — Execution Flow (Event-Driven)
 
@@ -46,10 +42,10 @@ Risk Manager --> Executor --> END
 The execution pipeline is a **one-shot** process that handles a single trade signal and exits. The listening happens at the platform level, not inside the agent team:
 
 1. The platform's webhook endpoint (`POST /api/webhook/tradingview`) is always listening as long as the server is running.
-2. When TradingView fires a webhook, the platform validates the secret, checks the kill switch, deduplicates the signal, and matches the signal's `strategy_name` against the currently active strategy. Mismatched signals are logged but ignored.
-3. If the signal matches, the platform **spawns** the execution pipeline as a subprocess for that specific signal.
-4. **The Risk Manager** fetches the Binance account balance, calculates ATR-based position sizing at 2% risk per trade, checks drawdown limits (10% max), verifies open position caps (3 max), and either approves or rejects the trade.
-5. **The Executor** places a market order on Binance Spot, polls for confirmation, records the fill in MongoDB, and sets an OCO stop-loss / take-profit order.
+2. When TradingView fires a webhook, the platform validates the secret, checks the kill switch, deduplicates the signal, and matches the signal's `strategy_name` against the currently active strategy. For **entry signals** (open long or open short), only the active strategy is accepted. For **exit signals** (close / reduce), the platform also checks whether the signal's strategy has an open position — if so, the signal is allowed through even after a strategy switch, so the strategy that opened a position can close it.
+3. If the signal matches (or is an exit passthrough), the platform **spawns** the execution pipeline as a subprocess for that specific signal.
+4. **The Risk Manager** fetches the Binance USDT-M Futures account balance, fetches ATR on the **4H timeframe** (all strategies operate on 4H), calculates strategy-aware position sizing at 2% risk per trade, checks drawdown limits (10% max), verifies open position caps (3 max), and either approves or rejects the trade. Stop-loss distances are tailored per strategy (e.g. wider 3× ATR "disaster stop" for `ema_trend` and `macd_trend` since their Pine Script trailing stops handle normal exits; 2.5× ATR for `rsi_momentum`).
+5. **The Executor** places a market order on **Binance USDT-M Futures**, polls for confirmation, records the fill in MongoDB, and sets protective orders (e.g. OCO stop-loss / take-profit) appropriate for futures.
 6. The pipeline exits. The next webhook will spawn a new execution pipeline.
 
 > **Note:** Running execution mode manually from the UI will exit immediately because no signal data is provided. This is expected — execution is designed to be triggered by webhooks, not by the Run Now button.
@@ -60,28 +56,35 @@ The system uses a **passive filtering** design. No agent communicates with Tradi
 
 ```
 TradingView (cloud)
-  ├── trend_following.pine  ──┐
-  ├── mean_reversion.pine   ──┼── All 3 strategies fire webhooks simultaneously
-  └── scalping.pine         ──┘
+  ├── ema_trend.pine      ──┐
+  ├── rsi_momentum.pine   ──┼── All three strategies fire webhooks simultaneously
+  └── macd_trend.pine     ──┘
                                │
                     POST /api/webhook/tradingview
                                │
                                ▼
-                    ┌─────────────────────┐
-                    │  Platform Webhook   │
-                    │  Filter:            │
-                    │  signal.strategy == │──── NO ──→ Log & ignore
-                    │  active_strategy?   │
-                    └────────┬────────────┘
+                    ┌──────────────────────────┐
+                    │  Platform Webhook Filter  │
+                    │                          │
+                    │  Entry (long/short):     │
+                    │  strategy == active?  ───│──── NO ──→ Log & ignore
+                    │                          │
+                    │  Exit / close:           │
+                    │  strategy == active       │
+                    │  OR has open position? ──│──── NO ──→ Log & ignore
+                    └────────┬─────────────────┘
                              │ YES
                              ▼
                     Pipeline 2 (Execution)
-                    Risk Manager → Executor → Binance
+                    Risk Manager → Executor → Binance USDT-M Futures
 ```
 
-All three Pine Script strategies run independently on TradingView and fire signals whenever their entry conditions are met. The platform receives every signal but only acts on the one whose `strategy_name` matches the active strategy selected by Pipeline 1. The rest are logged and discarded.
+All three Pine Script strategies run independently on TradingView and fire signals whenever their entry conditions are met. The platform receives every signal and applies a two-tier filter:
 
-The "hot-swapping" happens entirely on the platform side — Pipeline 1 writes the active strategy to MongoDB, and the webhook filter reads it. Nothing is changed on TradingView.
+- **Entry signals (open long or open short):** only accepted from the currently active strategy.
+- **Exit signals (close / reduce):** accepted from the active strategy **or** from any strategy that has an open position. This ensures a strategy that opened a position can always close it, even after a strategy switch.
+
+The "hot-swapping" happens entirely on the platform side — Pipeline 1 writes the active strategy to MongoDB, and the webhook filter reads it. Nothing is changed on TradingView. When the strategy switches, the Strategist agent also **cancels all open Binance USDT-M Futures orders** from the previous strategy to prevent interference.
 
 ## Market Analysis Data Pipeline
 
@@ -108,22 +111,27 @@ The `compute_indicators` node runs the 4H candles through the Python `ta` librar
 | Volume | Volume ratio (current volume vs. 20-period moving average) |
 | Price | Current price |
 
-### Stage 3 — LLM classifies the regime
+### Stage 3 — Classify the regime (LLM + quantitative cross-check)
 
-All 19 indicators are formatted into a structured prompt and sent to the configured LLM (Google Gemini, Anthropic Claude, or DeepSeek — selectable from the Trading tab settings). The LLM reads the numbers and returns:
-- **Regime** — one of `trending_up`, `trending_down`, `ranging`, `high_volatility`, `breakout`, `accumulation`
+All 19 indicators are formatted into a structured prompt and sent to the configured LLM (Google Gemini, Anthropic Claude, DeepSeek, Groq, or OpenAI — selectable from the Settings tab). The LLM reads the numbers and returns:
+- **Regime** — one of `uptrend`, `downtrend`, `ranging`, `volatile_breakout`
 - **Confidence** — 0–100%
 - **Reasoning** — a natural-language explanation of the classification
 
-The result is stored in MongoDB's `market_regimes` collection and used by the Strategist to select the active strategy.
+To guard against LLM inconsistency, the classifier runs a **deterministic quantitative fallback** in parallel using the same indicators (ADX thresholds, BB width percentile, ATR %, volume ratio, EMA alignment). The two results are cross-checked:
+- If they **agree** → the LLM result is used (higher nuance).
+- If they **disagree** and LLM confidence is **below 65%** → the quantitative result wins.
+- If they **disagree** but LLM confidence is **high** → the LLM result is kept.
+
+Both the LLM regime, quantitative regime, and final decision are stored in MongoDB's `market_regimes` collection for auditability.
 
 ## Agent Summary
 
 | Agent | Role | Key Inputs | Key Outputs |
 |-------|------|-----------|-------------|
-| Analyst | Market regime detection | Binance OHLCV candles | Regime classification + confidence |
+| Analyst | Market regime detection (LLM + quantitative cross-check) | Binance OHLCV candles | Regime classification + confidence |
 | Strategist | Strategy selection | Regime + indicators | Active strategy stored in MongoDB |
-| Risk Manager | Position sizing + risk gates | Account balance, ATR, signal | Approved/rejected + position size, SL, TP |
+| Risk Manager | Timeframe-aware position sizing + risk gates | Account balance, ATR (fetched on strategy's native timeframe), signal + strategy name | Approved/rejected + position size, SL, TP |
 | Executor | Order placement | Signal + risk params | Binance order ID, fill price, trade record |
 
 ## Directory Structure
@@ -132,7 +140,7 @@ The result is stored in MongoDB's `market_regimes` collection and used by the St
 trading_agents/
 ├── shared/                    Shared code across all agents
 │   ├── llm.py                 Multi-provider LLM wrapper (Gemini, Claude, DeepSeek)
-│   ├── binance_client.py      Binance Spot API wrapper
+│   ├── binance_client.py      Binance USDT-M Futures API wrapper
 │   ├── indicators.py          Technical indicator calculations (ta library)
 │   ├── models.py              Data models (MarketRegime, TradeSignal, RiskParams, etc.)
 │   ├── config.py              Trading pair, risk limits, indicator periods, LLM providers
@@ -144,7 +152,7 @@ trading_agents/
 │   ├── nodes/
 │   │   ├── fetch_data.py      Pulls OHLCV from Binance API
 │   │   ├── compute_indicators.py  ADX, ATR, BB, EMA, RSI, MACD, volume
-│   │   └── classify_regime.py Gemini-assisted regime classification
+│   │   └── classify_regime.py LLM + quantitative cross-check regime classification
 │   ├── tools/market_tools.py  @tool functions for market data
 │   └── prompts/               Regime classification prompt templates
 ├── agent_strategist/          Strategy selection
@@ -157,8 +165,8 @@ trading_agents/
 ├── agent_risk_manager/        Position sizing and risk gates
 │   ├── agent.py               LangGraph: fetch_account -> calculate_risk -> approve_trade
 │   └── nodes/
-│       ├── fetch_account.py   Binance balance + open orders
-│       ├── calculate_risk.py  ATR-based sizing, SL/TP levels
+│       ├── fetch_account.py   Binance balance + open orders + timeframe-aware ATR
+│       ├── calculate_risk.py  Timeframe-aware ATR-based sizing, SL/TP levels
 │       └── approve_trade.py   Drawdown check, position limits, final gate
 ├── agent_executor/            Order execution
 │   ├── agent.py               LangGraph: validate -> place_order -> confirm -> set_stop_loss
@@ -179,10 +187,10 @@ trading_agents/
 │       ├── trades.html        Recent executed trades table
 │       ├── signals.html       Recent trade signals table
 │       └── strategy.html      Strategy selection history
-├── strategies/                TradingView Pine Script strategies
-│   ├── trend_following.pine   EMA crossover + ADX + MACD
-│   ├── mean_reversion.pine    Bollinger Band bounce + RSI + volume
-│   └── scalping.pine          VWAP + EMA(9) + volume spike
+├── strategies/                TradingView Pine Script strategies (walk-forward validated)
+│   ├── ema_trend.pine         4H — pure EMA crossover with ATR trailing stop (OOS Sharpe 1.14)
+│   ├── rsi_momentum.pine      4H — RSI 50-line crossover + EMA confirmation (OOS Sharpe 1.63)
+│   └── macd_trend.pine        4H — MACD histogram sign-change + EMA filter (portfolio diversifier)
 ├── tests/
 │   └── test_pipeline.py       State schema and mapping tests
 ├── requirements.txt           Python dependencies
@@ -213,8 +221,8 @@ Settings can be configured in two ways:
 | `DEEPSEEK_API_KEY` | DeepSeek API key | (required if using DeepSeek) |
 | `GROQ_API_KEY` | Groq API key | (required if using Groq) |
 | `OPENAI_API_KEY` | OpenAI API key | (required if using OpenAI) |
-| `BINANCE_API_KEY` | Binance Spot API key | (required) |
-| `BINANCE_API_SECRET` | Binance Spot API secret | (required) |
+| `BINANCE_API_KEY` | Binance USDT-M Futures API key | (required) |
+| `BINANCE_API_SECRET` | Binance USDT-M Futures API secret | (required) |
 | `TRADING_PAIR` | Symbol to trade | `BTCUSDT` |
 | `MAX_RISK_PER_TRADE` | Fraction of portfolio risked per trade | `0.02` (2%) |
 | `MAX_OPEN_POSITIONS` | Maximum concurrent positions | `3` |
@@ -263,64 +271,65 @@ When TradingView fires a webhook to `POST /api/webhook/tradingview`, the platfor
 - **Daily trade cap** prevents runaway execution (default: 50 trades/day).
 - **Drawdown limit** pauses trading if portfolio drops more than 10% from peak.
 - **Max positions** prevents over-exposure (default: 3 concurrent).
+- **Exit passthrough** — exit signals are accepted from any strategy that has an open position, even after a strategy switch. This prevents positions from being stranded when the active strategy changes.
+- **OCO cleanup on strategy switch** — when the Strategist hot-swaps strategies, all open Binance USDT-M Futures orders from the previous strategy are cancelled automatically to prevent orphaned stop-loss/take-profit orders from interfering.
+- **Quantitative cross-check** — the LLM regime classifier is validated against a deterministic indicator-based fallback, reducing the risk of misclassification-driven trades.
 
 ## Pine Script Strategies
 
-Three TradingView strategies in `strategies/` send webhook alerts to this system. Each strategy has its **own parameters defined as TradingView inputs** inside the `.pine` file — these are completely independent from the Indicator Periods in the Settings panel (which only affect the Analyst's regime classification). To change a strategy's trading behavior, edit the `.pine` file directly or override the inputs in TradingView's strategy settings.
+Three walk-forward validated TradingView strategies in `strategies/` send webhook alerts to this system. Each strategy has its **own parameters defined as TradingView inputs** inside the `.pine` file — these are completely independent from the Indicator Periods in the Settings panel (which only affect the Analyst's regime classification). To change a strategy's trading behavior, edit the `.pine` file directly or override the inputs in TradingView's strategy settings.
 
-| Strategy | Regime | Timeframe | Entry Logic |
-|----------|--------|-----------|-------------|
-| `trend_following` | Trending | 4H | EMA(9/21) crossover + ADX > 25 + MACD confirmation |
-| `mean_reversion` | Ranging | 4H | Bollinger Band bounce + RSI oversold/overbought + volume |
-| `scalping` | High volatility | 1H | VWAP + EMA(9) + volume spike, wide TP (3× ATR) |
+> **Note:** All three strategies support **bidirectional** trading (**long and short**) on Binance USDT-M Futures, aligned with the webhook and execution pipeline. All run on the **4H timeframe**.
+
+> **Design philosophy:** Each strategy uses only **2–3 tunable parameters** (plus fixed ATR length). This radical simplification was the key to surviving walk-forward validation — strategies with 5+ parameters consistently overfit during training and degraded on unseen data.
+
+| Strategy | Regime(s) | Timeframe | OOS Sharpe | OOS Return | WF Efficiency | Entry logic (bidirectional) |
+|----------|-----------|-----------|------------|------------|---------------|----------------------------|
+| `ema_trend` | Uptrend, Downtrend | **4H** | 1.14 | +60.4% | 390% | EMA fast crosses above/below EMA slow → long/short; flips directly on cross |
+| `rsi_momentum` | All regimes | **4H** | 1.63 | +101.0% | 137% | RSI crosses above 50 + price > EMA → long; RSI crosses below 50 + price < EMA → short |
+| `macd_trend` | Uptrend, Downtrend, Volatile Breakout | **4H** | — | +8.3% | 73% | MACD histogram turns positive + price > EMA → long; histogram turns negative + price < EMA → short |
 
 ### Strategy Parameters
 
-#### `trend_following.pine`
+#### `ema_trend.pine` (4-hour timeframe) — Walk-Forward Validated
+
+Pure EMA crossover trend strategy. Flips directly between long and short on EMA cross, with ATR trailing stop as risk management. On the execution side, the OCO is placed as a wide 3× ATR "disaster stop" — the Pine trailing stop handles normal exits via webhook.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| EMA Fast Length | 9 | Fast EMA for crossover signal |
-| EMA Mid Length | 21 | Mid EMA for crossover signal |
-| ADX Length | 14 | ADX period for trend strength |
-| ADX Threshold | 25.0 | Minimum ADX to confirm a strong trend |
+| EMA Fast Length | 12 | Fast EMA for crossover signal |
+| EMA Slow Length | 50 | Slow EMA for crossover signal |
 | ATR Length | 14 | ATR period for trailing stop |
-| ATR Trailing Stop Multiplier | 2.0 | Trailing stop distance as multiple of ATR |
+| ATR Trailing Stop Multiplier | 3.5 | Trailing stop distance as multiple of ATR |
 
-#### `mean_reversion.pine`
+#### `rsi_momentum.pine` (4-hour timeframe) — Walk-Forward Validated
+
+RSI 50-line crossover with EMA trend confirmation. The strongest standalone performer in walk-forward testing. Works across all market regimes and is the recommended default strategy.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| Bollinger Band Length | 20 | BB lookback period |
-| Bollinger Band Std Dev | 2.0 | BB width in standard deviations |
 | RSI Length | 14 | RSI lookback period |
-| RSI Oversold Level | 30.0 | RSI threshold for buy signal |
-| RSI Overbought Level | 70.0 | RSI threshold for sell signal |
-| Volume Confirmation Multiple | 1.5 | Volume must exceed this × volume MA |
-| ATR Length | 14 | ATR period for stop-loss |
-| ATR Stop Loss Multiple | 1.5 | Stop-loss distance as multiple of ATR |
+| EMA Length | 50 | EMA for trend direction confirmation |
+| ATR Length | 14 | ATR period for trailing stop |
+| ATR Trailing Stop Multiplier | 3.0 | Trailing stop distance as multiple of ATR |
 
-#### `scalping.pine`
+#### `macd_trend.pine` (4-hour timeframe) — Portfolio Diversifier
+
+MACD histogram sign-change with EMA trend filter. While not the strongest standalone performer, it provides portfolio diversification due to uncorrelated signal generation compared to EMA and RSI-based strategies.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| EMA Length | 10 | EMA period for trend filter |
-| ATR Length | 22 | ATR period for SL/TP calculation |
-| ATR Stop Loss Multiple | 0.65 | Stop-loss distance as multiple of ATR |
-| ATR Take Profit Multiple | 3.0 | Take-profit distance as multiple of ATR |
-| Volume Spike Threshold | 2.75× | Volume must exceed this × volume MA |
-| Volume MA Length | 35 | Lookback for volume moving average |
-| Session Start Hour (UTC) | 8 | Start of active trading window |
-| Session End Hour (UTC) | 19 | End of active trading window |
-| RSI Length | 10 | RSI period for momentum confirmation |
-| RSI Minimum for Entry | 50 | Only enter when RSI is above this level |
-| Cooldown Bars After Exit | 6 | Minimum bars to wait between trades |
+| MACD Fast Length | 12 | Fast EMA for MACD calculation |
+| MACD Slow Length | 26 | Slow EMA for MACD calculation |
+| MACD Signal Length | 9 | Signal line EMA period |
+| ATR Length | 14 | ATR period for trailing stop |
+| ATR Trailing Stop Multiplier | 3.0 | Trailing stop distance as multiple of ATR |
 
 Each strategy sends a JSON webhook payload containing `strategy_name`, `action`, `ticker`, `price`, and a shared `secret` for authentication.
 
 ## Strategy Backtest — Walk-Forward Analysis Engine
 
-The platform includes a walk-forward backtesting engine (`agent_platform/api/routes/backtest.py`) that translates the three Pine Script strategies into Python and runs them against historical Binance data. The purpose is to expose curve-fitting: comparing what a retail backtest shows (in-sample, optimised on all data) vs. what actually happens on unseen data (out-of-sample, blind-tested).
+The platform includes a walk-forward backtesting engine (`agent_platform/api/routes/backtest.py`) that translates all five Pine Script strategies into Python and runs them against historical Binance data. The purpose is to expose curve-fitting: comparing what a retail backtest shows (in-sample, optimised on all data) vs. what actually happens on unseen data (out-of-sample, blind-tested).
 
 Access the backtest tool from the **Backtest** tab under Dashboard.
 
@@ -347,17 +356,29 @@ Traditional backtesting optimises a strategy over the entire historical dataset 
 
 The engine then compares this stitched out-of-sample result against a conventional backtest (global optimisation on all data) to quantify the degradation.
 
+### Binance USDT-M Futures fees
+
+Walk-forward runs deduct per-trade costs using the `exchange_fee` and `slippage` fields (percent **per position change**, applied as in `backtest.py`). For Binance USDT-M Futures, use fee tiers consistent with published rates:
+
+| | Rate |
+|---|------|
+| Maker | **0.02%** |
+| Taker | **0.05%** |
+| Typical blended (pay fees with BNB) | **~0.04%** average |
+
+Example: model mixed execution with `"exchange_fee": 0.04` (meaning **0.04%** per the engine’s percent convention). Adjust upward if you assume mostly taker fills.
+
 ### Strategies (Python Translations)
 
-Each Pine Script strategy is translated to Python with the same core logic. The timeframe and optimised parameters differ per strategy:
+Each Pine Script strategy is translated to Python with the same core logic (including **long and short**). All strategies run on the **4H timeframe** with only 2–3 tunable parameters each:
 
 | Strategy | Timeframe | Indicators | Entry | Exit | Optimised Parameters |
 |----------|-----------|------------|-------|------|---------------------|
-| `scalping` | **15m** | EMA, VWAP, RSI, Volume MA, ATR | Price > VWAP, Price > EMA, volume spike, RSI > 50 | Price < VWAP or < EMA, or SL/TP hit | `ema_len`, `vol_thresh`, `atr_sl`, `atr_tp` (144 combos) |
-| `trend_following` | **4h** | Dual EMA, ADX, MACD, ATR | Bullish EMA cross + ADX above threshold + MACD > 0 | Bearish cross, weak trend, or trailing stop | `ema_fast`, `ema_mid`, `adx_thresh`, `atr_trail` (~100 combos) |
-| `mean_reversion` | **4h** | Bollinger Bands, RSI, Volume MA, ATR | Price at lower BB + RSI oversold + volume confirmation | Upper BB + RSI overbought, mean reversion to middle BB, or SL | `bb_len`, `bb_std`, `rsi_os`, `rsi_ob` (81 combos) |
+| `ema_trend` | **4h** | EMA fast, EMA slow, ATR | EMA fast crosses above slow → long; crosses below → short; flips directly | ATR trailing stop or opposite EMA cross | `ema_fast`, `ema_slow`, `atr_trail` |
+| `rsi_momentum` | **4h** | RSI, EMA, ATR | RSI crosses above 50 + price > EMA → long; RSI crosses below 50 + price < EMA → short | ATR trailing stop or opposite RSI cross | `rsi_len`, `ema_len`, `atr_trail` |
+| `macd_trend` | **4h** | MACD histogram, EMA, ATR | MACD histogram turns positive + price > EMA → long; histogram turns negative + price < EMA → short | ATR trailing stop or opposite MACD cross | `macd_fast`, `macd_slow`, `atr_trail` |
 
-Some Pine Script inputs (time filter, cooldown bars, webhook secret) are not translated because they don't apply to historical backtesting.
+Legacy strategies (`trend_following`, `mean_reversion`, `swing_momentum`, `pullback`, `breakout`, `accumulation`) are still available in the backtest engine for comparison but are no longer seeded as defaults.
 
 ### Technical Indicators
 
@@ -373,6 +394,7 @@ All indicators are implemented in pure numpy/pandas to avoid external TA library
 | `_adx` | Average Directional Index (+DI, −DI, DX, smoothed ADX) |
 | `_macd` | MACD histogram (fast EMA − slow EMA − signal EMA) |
 | `_vwap` | Rolling Volume-Weighted Average Price over a lookback period |
+| `_donchian` | Donchian Channel (rolling highest high, lowest low, midline) |
 
 ### Optimisation
 
@@ -380,7 +402,7 @@ Each fold performs a grid search over the strategy's parameter space:
 
 - Iterates every parameter combination in the grid
 - Executes the strategy, computes per-candle returns with transaction costs (exchange fee + slippage deducted on every position change)
-- Calculates the annualised Sharpe ratio (annualisation factor depends on the timeframe: √35,040 for 15m, √2,190 for 4h)
+- Calculates the annualised Sharpe ratio (annualisation factor depends on the timeframe: **15m:** 4 × 24 × 365 = **35,040** periods/year → √35,040; **2h:** √4,380; **4h:** √2,190)
 - Selects the parameter set with the highest Sharpe
 
 ### OHLCV Data Caching (MongoDB Timeseries)
@@ -412,8 +434,8 @@ Request body:
   "end": "2025-01-01",
   "train_days": 14,
   "test_days": 3,
-  "strategy": "scalping",
-  "exchange_fee": 0.10,
+  "strategy": "trend_following",
+  "exchange_fee": 0.04,
   "slippage": 0.05
 }
 ```

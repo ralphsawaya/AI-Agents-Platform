@@ -1,9 +1,32 @@
-"""Calculate position size, stop-loss, and take-profit levels."""
+"""Calculate position size, stop-loss, and take-profit levels.
+
+ATR is fetched on 4H for all WF-validated strategies (ema_trend,
+rsi_momentum, macd_trend) — see fetch_account.py.
+
+  - ema_trend: 3x ATR — rides trends with wide trail, OCO disaster stop.
+  - rsi_momentum: 2.5x ATR — momentum with moderate room for volatility.
+  - macd_trend: 3x ATR — similar to ema_trend, trend-riding.
+"""
 
 from shared.config import MAX_RISK_PER_TRADE, MAX_OPEN_POSITIONS, MAX_DRAWDOWN
 from shared.logger import get_logger
 
 logger = get_logger("risk_manager.calculate_risk")
+
+STRATEGY_ATR_MULT = {
+    "ema_trend": 3.0,
+    "rsi_momentum": 2.5,
+    "macd_trend": 3.0,
+}
+
+STRATEGY_TP_RATIO = {
+    "ema_trend": 3.0,
+    "rsi_momentum": 2.5,
+    "macd_trend": 3.0,
+}
+
+DEFAULT_ATR_MULT = 2.5
+DEFAULT_TP_RATIO = 2.5
 
 
 def calculate_risk(state: dict) -> dict:
@@ -12,7 +35,7 @@ def calculate_risk(state: dict) -> dict:
 
     signal = state.get("signal", {})
     action = signal.get("action", "")
-    signal_price = signal.get("price", 0.0)
+    strategy_name = signal.get("strategy_name", "")
 
     account_balance = state.get("account_balance", 0.0)
     current_price = state.get("current_price", 0.0)
@@ -28,41 +51,45 @@ def calculate_risk(state: dict) -> dict:
             "status": "risk_calculated",
         }
 
-    # Max risk amount per trade
     risk_amount = total_portfolio * MAX_RISK_PER_TRADE
 
-    # Stop-loss distance based on ATR (1.5x ATR)
-    stop_distance = atr * 1.5 if atr > 0 else current_price * 0.02
+    atr_mult = STRATEGY_ATR_MULT.get(strategy_name, DEFAULT_ATR_MULT)
+    tp_ratio = STRATEGY_TP_RATIO.get(strategy_name, DEFAULT_TP_RATIO)
+    stop_distance = atr * atr_mult if atr > 0 else current_price * 0.02
 
-    # Position size: risk_amount / stop_distance (in BTC)
+    if strategy_name in ("ema_trend", "macd_trend"):
+        logger.info(
+            "%s: using %.1fx ATR disaster stop (trailing stop handles normal exits)",
+            strategy_name, atr_mult,
+        )
+
     if stop_distance > 0:
         position_size_btc = risk_amount / stop_distance
     else:
         position_size_btc = risk_amount / (current_price * 0.02)
 
-    # Cap position size at available balance
     max_affordable = account_balance / current_price if current_price > 0 else 0
     position_size_btc = min(position_size_btc, max_affordable * 0.95)
 
-    # Calculate stop-loss and take-profit prices
     if action in ("buy", "close_sell"):
         stop_loss_price = current_price - stop_distance
-        take_profit_price = current_price + (stop_distance * 2)
+        take_profit_price = current_price + (stop_distance * tp_ratio)
     elif action in ("sell", "close_buy", "close"):
         stop_loss_price = current_price + stop_distance
-        take_profit_price = current_price - (stop_distance * 2)
+        take_profit_price = current_price - (stop_distance * tp_ratio)
     else:
         stop_loss_price = 0.0
         take_profit_price = 0.0
 
-    # Round BTC to 5 decimal places (Binance minimum step)
     position_size_btc = round(position_size_btc, 5)
 
     logger.info(
-        "Risk calc: size=%.5f BTC (%.2f USDT), SL=%.2f, TP=%.2f, risk=%.2f USDT",
+        "Risk calc [%s]: size=%.5f BTC (%.2f USDT), SL=%.2f (%.1fx ATR), TP=%.2f, risk=%.2f USDT",
+        strategy_name or "unknown",
         position_size_btc,
         position_size_btc * current_price,
         stop_loss_price,
+        atr_mult,
         take_profit_price,
         risk_amount,
     )

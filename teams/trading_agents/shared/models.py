@@ -6,22 +6,47 @@ from enum import Enum
 
 
 class MarketRegimeType(str, Enum):
+    UPTREND = "uptrend"
+    DOWNTREND = "downtrend"
+    RANGING = "ranging"
+    VOLATILE_BREAKOUT = "volatile_breakout"
+
+    # Legacy aliases kept for backward compatibility with stored MongoDB docs
     TRENDING_UP = "trending_up"
     TRENDING_DOWN = "trending_down"
-    RANGING = "ranging"
     HIGH_VOLATILITY = "high_volatility"
+    BREAKOUT = "breakout"
+    ACCUMULATION = "accumulation"
+
+
+ACTIVE_REGIMES = {
+    MarketRegimeType.UPTREND,
+    MarketRegimeType.DOWNTREND,
+    MarketRegimeType.RANGING,
+    MarketRegimeType.VOLATILE_BREAKOUT,
+}
 
 
 class StrategyName(str, Enum):
+    EMA_TREND = "ema_trend"
+    RSI_MOMENTUM = "rsi_momentum"
+    MACD_TREND = "macd_trend"
+
+    # Legacy — kept for backward compatibility
     TREND_FOLLOWING = "trend_following"
     MEAN_REVERSION = "mean_reversion"
-    SCALPING = "scalping"
+    SWING_MOMENTUM = "swing_momentum"
+    PULLBACK = "pullback"
+    BREAKOUT = "breakout"
+    ACCUMULATION = "accumulation"
 
 
 class TradeAction(str, Enum):
     BUY = "buy"
     SELL = "sell"
     CLOSE = "close"
+    CLOSE_BUY = "close_buy"
+    CLOSE_SELL = "close_sell"
 
 
 class OrderStatus(str, Enum):

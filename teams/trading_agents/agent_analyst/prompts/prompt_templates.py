@@ -4,7 +4,7 @@ REGIME_CLASSIFICATION_PROMPT = """You are an expert cryptocurrency market analys
 
 CURRENT INDICATORS:
 - Price: ${price}
-- ADX (14): {adx} (trend strength: >25 = strong trend, <20 = weak/no trend)
+- ADX (14): {adx} (trend strength: >22 = trending, <22 = weak/no trend)
 - ATR (14): {atr} ({atr_pct}% of price)
 - Bollinger Bands (20,2): Upper={bb_upper}, Middle={bb_middle}, Lower={bb_lower}, Width={bb_width}
 - EMA(9): {ema_fast} (slope: {ema_fast_slope}%)
@@ -14,18 +14,18 @@ CURRENT INDICATORS:
 - MACD: {macd}, Signal: {macd_signal}, Histogram: {macd_hist}
 - Volume Ratio (vs 20-period MA): {volume_ratio}x
 
-CLASSIFICATION RULES:
-1. TRENDING_UP: ADX > 25, price above EMA(50), EMA(9) > EMA(21) > EMA(50), positive EMA slopes, MACD above signal
-2. TRENDING_DOWN: ADX > 25, price below EMA(50), EMA(9) < EMA(21) < EMA(50), negative EMA slopes, MACD below signal
-3. RANGING: ADX < 20, price oscillating near BB middle, narrow BB width, RSI between 40-60
-4. HIGH_VOLATILITY: Wide BB width (>4% of price), ATR > 2% of price, volume ratio > 1.5, can occur in any direction
-5. BREAKOUT: Price breaking above BB upper or below BB lower with volume ratio > 1.5, ADX rising from below 20 to above 20-25, EMA slopes turning sharply, often follows a period of consolidation. Key distinction from trending: ADX is *increasing* rather than already high, and the move is fresh (not sustained).
-6. ACCUMULATION: ADX < 15, very narrow BB width (<2% of price), low ATR, volume ratio gradually increasing (0.8-1.3x) while price stays flat, EMAs converging/flat. This is a pre-breakout consolidation phase — price is coiling before a move. Key distinction from ranging: volume is building and BB width is tighter than normal ranging.
+CLASSIFICATION RULES (4 regimes):
+1. UPTREND: ADX > 22, EMA(9) > EMA(21) > EMA(50) (triple alignment), EMA(50) slope positive, MACD above signal. Sustained directional move upward.
+2. DOWNTREND: ADX > 22, EMA(9) < EMA(21) < EMA(50) (reverse alignment), EMA(50) slope negative, MACD below signal. Sustained directional move downward.
+3. RANGING: ADX < 22 or EMAs not aligned, price oscillating near BB middle, RSI between 35-65. Sideways/mean-reverting market with low directional bias.
+4. VOLATILE_BREAKOUT: ATR > 2.5% of price, BB width > 4%, volume ratio > 1.5x. High-volatility expansion from consolidation, can occur in any direction.
+
+PRIORITY: Check volatile_breakout first (rare, highest priority). Then check uptrend/downtrend. Default to ranging if signals are mixed.
 
 Respond in EXACTLY this format (3 lines, no extra text):
-REGIME: <one of: trending_up, trending_down, ranging, high_volatility, breakout, accumulation>
+REGIME: <one of: uptrend, downtrend, ranging, volatile_breakout>
 CONFIDENCE: <percentage 0-100>
 REASONING: <one paragraph explaining the key factors>"""
 
 
-REGIME_SYSTEM_PROMPT = """You are a quantitative market analyst specializing in cryptocurrency markets. You analyze technical indicators to determine the current market regime for BTC/USDT. Your classifications directly drive automated strategy selection, so accuracy is critical. Always err on the side of caution — if signals are mixed, classify as 'ranging' rather than forcing a trend call. Pay special attention to accumulation patterns (tightening Bollinger Bands with building volume) as these often precede breakouts."""
+REGIME_SYSTEM_PROMPT = """You are a quantitative market analyst specializing in cryptocurrency markets. You analyze technical indicators to determine the current market regime for BTC/USDT. Your classifications directly drive automated strategy selection, so accuracy is critical. Always err on the side of caution — if signals are mixed, classify as 'ranging' rather than forcing a trend call. Use the simplified 4-regime model: uptrend, downtrend, ranging, volatile_breakout."""

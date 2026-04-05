@@ -1,19 +1,27 @@
-"""Evaluate which strategies are compatible with the current regime."""
+"""Evaluate which strategies are compatible with the current regime.
+
+Regime-strategy mapping supports parallel execution — multiple strategies
+can be active simultaneously when their target regimes match.
+"""
 
 from shared.logger import get_logger
 
 logger = get_logger("strategist.evaluate_strategies")
 
 REGIME_STRATEGY_MAP = {
-    "trending_up": ["trend_following"],
-    "trending_down": ["trend_following"],
-    "ranging": ["mean_reversion"],
-    "high_volatility": ["scalping"],
-    "breakout": ["trend_following"],
-    "accumulation": ["mean_reversion"],
+    "uptrend": ["ema_trend", "rsi_momentum", "macd_trend"],
+    "downtrend": ["ema_trend", "rsi_momentum", "macd_trend"],
+    "ranging": ["rsi_momentum"],
+    "volatile_breakout": ["rsi_momentum", "macd_trend"],
+    # Legacy regime names
+    "trending_up": ["ema_trend", "rsi_momentum", "macd_trend"],
+    "trending_down": ["ema_trend", "rsi_momentum", "macd_trend"],
+    "high_volatility": ["rsi_momentum", "macd_trend"],
+    "breakout": ["rsi_momentum", "macd_trend"],
+    "accumulation": ["rsi_momentum"],
 }
 
-ALL_STRATEGIES = ["trend_following", "mean_reversion", "scalping"]
+ALL_STRATEGIES = ["ema_trend", "rsi_momentum", "macd_trend"]
 
 
 def evaluate_strategies(state: dict) -> dict:
@@ -22,7 +30,6 @@ def evaluate_strategies(state: dict) -> dict:
 
     candidates = REGIME_STRATEGY_MAP.get(regime, ["mean_reversion"])
 
-    # Low-confidence regimes get all strategies as candidates for LLM evaluation
     if confidence < 0.5:
         candidates = ALL_STRATEGIES
         logger.info(
