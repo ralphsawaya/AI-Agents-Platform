@@ -18,11 +18,11 @@ All strategies run on 4H Binance USDT-M Futures and support both LONG and SHORT 
 Each strategy uses only 2-3 parameters — deliberately simple to avoid overfitting.
 All have been walk-forward validated on 2+ years of BTC data.
 
-1. ema_trend (4H): Pure EMA crossover trend strategy. LONG when fast EMA crosses above slow EMA, SHORT on opposite cross. ATR trailing stop exit. Flips directly between long and short. Walk-forward validated: OOS Sharpe 1.14, +60% return, 390% WF efficiency. Best in sustained trends (UPTREND / DOWNTREND).
+1. ema_trend (4H): Pure EMA crossover trend strategy. LONG when fast EMA crosses above slow EMA, SHORT on opposite cross. ATR trailing stop + cross exit (flips directly). Walk-forward validated: OOS Sharpe 1.19, +65% return, 408% WF efficiency. Best in sustained trends (UPTREND / DOWNTREND).
 
-2. rsi_momentum (4H): RSI 50-line crossover with EMA trend confirmation. LONG when RSI crosses above 50 and price > EMA; SHORT when RSI crosses below 50 and price < EMA. ATR trailing stop exit. Walk-forward validated: OOS Sharpe 1.63, +101% return, 137% WF efficiency. Works across all regimes — the safest default.
+2. rsi_momentum (4H): RSI 50-line crossover with EMA trend confirmation, trail-only exit. LONG when RSI crosses above 50 and price > EMA; SHORT when RSI crosses below 50 and price < EMA. Exit only on ATR trailing stop (no opposite RSI cross exit — reduces whipsaw). Walk-forward validated: OOS Sharpe 1.37, +89% return, 124% WF efficiency. Works across all regimes — the safest default.
 
-3. macd_trend (4H): MACD histogram sign-change with EMA trend filter. LONG when MACD histogram turns positive and price > EMA; SHORT on opposite. ATR trailing stop exit. OOS +8.3% return, 73% WF efficiency. Portfolio diversifier — uncorrelated to EMA/RSI signals.
+3. macd_trend (4H): MACD histogram sign-change with EMA trend filter, trail-only exit. LONG when MACD histogram turns positive and price > EMA; SHORT on opposite. Exit only on ATR trailing stop (no opposite MACD cross exit). OOS Sharpe 1.25, +80% return, 242% WF efficiency. Strong diversifier — uncorrelated to EMA/RSI signals.
 
 SELECTION CRITERIA:
 - Match strategy to regime strength and clarity

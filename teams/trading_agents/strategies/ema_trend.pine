@@ -2,7 +2,7 @@
 // © AI-Agents-Platform — EMA Trend Strategy (Walk-Forward Validated)
 // Designed for BTC/USDT on 4H timeframe (Binance USDT-M Futures)
 // Bidirectional: pure EMA crossover with ATR trailing stop
-// OOS Sharpe 1.14 | +60.4% return | 390% WF efficiency
+// OOS Sharpe 1.19 | +64.6% return | 408% WF efficiency
 
 //@version=6
 strategy("EMA Trend [AI-Agents]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.04)

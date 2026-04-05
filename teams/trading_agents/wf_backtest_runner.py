@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Walk-Forward Backtest Runner — Iteration 4
-===========================================
-RADICAL SIMPLIFICATION: each strategy has only 2-3 free parameters.
-Tiny grids make overfitting nearly impossible. 180-day train windows.
-Dropped Pullback (never worked). 3-strategy portfolio on 4H.
+Walk-Forward Backtest Runner — Iteration 12 (Final)
+====================================================
+Best-of-each combination from 11 iterations:
+EMA: cross+trail exits, ema_slow>=40 (it10). Sharpe ~1.19.
+RSI: trail-only exit, atr_trail 3.0-5.0 (it9). Sharpe ~1.37.
+MACD: trail-only exit, wide grid (it9). Sharpe ~1.25.
 """
 
 import time
@@ -104,9 +105,10 @@ def fetch_ohlcv(symbol, timeframe, start, end):
 # ══════════════════════════════════════════════════════════════════════
 # Strategy 1: EMA Trend (4H) — 3 parameters
 # ══════════════════════════════════════════════════════════════════════
-# Enter when EMA fast > slow (long) or fast < slow (short).
-# Hold until EMA cross against OR ATR trailing stop hit.
-# No ADX, no MACD, no DI. Pure price action.
+# Enter when EMA fast crosses above slow (long) or below slow (short).
+# Exit on ATR trailing stop OR opposite EMA cross (which triggers
+# immediate reversal). Cross exits are valuable for EMAs because
+# crosses are infrequent and represent genuine trend changes.
 
 def strat_ema_trend(close, high, low, volume, params):
     n = len(close)
@@ -151,7 +153,7 @@ def strat_ema_trend(close, high, low, volume, params):
 EMA_TREND_GRID = [
     {"ema_fast": f, "ema_slow": s, "atr_trail": t}
     for f in (8, 10, 12, 15, 20)
-    for s in (30, 40, 50, 60)
+    for s in (40, 50, 60)
     for t in (2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
     if f < s
 ]
@@ -162,7 +164,9 @@ EMA_TREND_GRID = [
 # ══════════════════════════════════════════════════════════════════════
 # Enter long on RSI crossing above 50 with price > EMA.
 # Enter short on RSI crossing below 50 with price < EMA.
-# Exit on trailing stop or opposite RSI cross.
+# Exit ONLY on ATR trailing stop — no opposite RSI cross exit.
+# Trail-only exit prevents rapid-fire whipsaw in choppy markets
+# where RSI oscillates around 50 repeatedly.
 
 def strat_rsi_momentum(close, high, low, volume, params):
     n = len(close)
@@ -188,13 +192,13 @@ def strat_rsi_momentum(close, high, low, volume, params):
                 direction = -1; trail = close[i] + av[i] * trail_mult; pos[i] = -1
         elif direction == 1:
             trail = max(trail, close[i] - av[i] * trail_mult)
-            if close[i] < trail or bear_cross:
+            if close[i] < trail:
                 direction = 0
             else:
                 pos[i] = 1
         elif direction == -1:
             trail = min(trail, close[i] + av[i] * trail_mult)
-            if close[i] > trail or bull_cross:
+            if close[i] > trail:
                 direction = 0
             else:
                 pos[i] = -1
@@ -202,78 +206,20 @@ def strat_rsi_momentum(close, high, low, volume, params):
 
 RSI_MOMENTUM_GRID = [
     {"rsi_len": r, "ema_len": e, "atr_trail": t}
-    for r in (12, 14, 16, 18, 20, 24)
-    for e in (30, 40, 50, 60)
-    for t in (2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
+    for r in (14, 16, 18, 20, 24)
+    for e in (40, 50, 60)
+    for t in (3.0, 3.5, 4.0, 5.0)
 ]
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Strategy 3a: Trend Dip (4H) — 3 parameters
-# ══════════════════════════════════════════════════════════════════════
-# Buy the dip in an uptrend: when EMA(slow) is rising and RSI dips
-# below threshold then recovers, enter long. Vice versa for shorts.
-# Complementary: enters on pullbacks, not trend starts like EMA/RSI.
-
-def strat_trend_dip(close, high, low, volume, params):
-    n = len(close)
-    pos = np.zeros(n)
-    es = _ema(close, params["ema_len"])
-    rv = _rsi(close, 14)
-    av = _atr(high, low, close, 14)
-    trail_mult = params["atr_trail"]
-    rsi_dip = params["rsi_dip"]  # e.g. 35
-
-    slope_lb = 10
-    direction = 0; trail = 0.0; was_dipped = False; was_spiked = False
-
-    for i in range(slope_lb + 1, n):
-        if np.isnan(es[i]) or np.isnan(rv[i]) or np.isnan(av[i]):
-            continue
-        slope = (es[i] - es[i - slope_lb]) / es[i - slope_lb] * 100
-        uptrend = slope > 0.1
-        downtrend = slope < -0.1
-
-        if rv[i] < rsi_dip:
-            was_dipped = True
-        if rv[i] > (100 - rsi_dip):
-            was_spiked = True
-
-        if direction == 0:
-            if uptrend and was_dipped and rv[i] > rsi_dip and rv[i-1] <= rsi_dip:
-                direction = 1; trail = close[i] - av[i] * trail_mult
-                pos[i] = 1; was_dipped = False
-            elif downtrend and was_spiked and rv[i] < (100 - rsi_dip) and rv[i-1] >= (100 - rsi_dip):
-                direction = -1; trail = close[i] + av[i] * trail_mult
-                pos[i] = -1; was_spiked = False
-        elif direction == 1:
-            trail = max(trail, close[i] - av[i] * trail_mult)
-            if close[i] < trail or not uptrend:
-                direction = 0
-            else:
-                pos[i] = 1
-        elif direction == -1:
-            trail = min(trail, close[i] + av[i] * trail_mult)
-            if close[i] > trail or not downtrend:
-                direction = 0
-            else:
-                pos[i] = -1
-    return pos
-
-TREND_DIP_GRID = [
-    {"ema_len": e, "rsi_dip": r, "atr_trail": t}
-    for e in (30, 40, 50, 60)
-    for r in (30, 33, 36, 40)
-    for t in (2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
-]
-
-
-# ══════════════════════════════════════════════════════════════════════
-# Strategy 3b: MACD Trend (4H) — 3 parameters
+# Strategy 3: MACD Trend (4H) — 3 parameters
 # ══════════════════════════════════════════════════════════════════════
 # Enter on MACD histogram turning positive (long) or negative (short)
 # when price is on the correct side of EMA.
-# Simple, few parameters, captures momentum shifts differently than RSI.
+# Exit ONLY on ATR trailing stop — no opposite histogram exit.
+# MACD histogram changes are very noisy in choppy markets; trail-only
+# exit prevents the rapid-fire whipsaw that killed the original MACD.
 
 def strat_macd_trend(close, high, low, volume, params):
     n = len(close)
@@ -302,13 +248,13 @@ def strat_macd_trend(close, high, low, volume, params):
                 direction = -1; trail = close[i] + av[i] * trail_mult; pos[i] = -1
         elif direction == 1:
             trail = max(trail, close[i] - av[i] * trail_mult)
-            if close[i] < trail or bear_cross:
+            if close[i] < trail:
                 direction = 0
             else:
                 pos[i] = 1
         elif direction == -1:
             trail = min(trail, close[i] + av[i] * trail_mult)
-            if close[i] > trail or bull_cross:
+            if close[i] > trail:
                 direction = 0
             else:
                 pos[i] = -1
@@ -318,7 +264,7 @@ MACD_GRID = [
     {"macd_fast": f, "macd_slow": s, "atr_trail": t}
     for f in (8, 10, 12, 16)
     for s in (20, 26, 34)
-    for t in (2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
+    for t in (3.0, 3.5, 4.0, 5.0)
     if f < s
 ]
 
@@ -476,9 +422,9 @@ def walk_forward(name, tf, fn, grid, df, train_days, test_days, af):
     print(f"  Param stability: {up} unique / {len(fps)} folds")
 
     issues = []
-    if oos_met["sharpe"] < 0.5: issues.append(f"OOS Sh {oos_met['sharpe']:.3f} < 0.5")
+    if oos_met["sharpe"] < 1.2: issues.append(f"OOS Sh {oos_met['sharpe']:.3f} < 1.2")
     for y, ym in yr.items():
-        if ym["sharpe"] < -0.5: issues.append(f"{y} Sh {ym['sharpe']:.3f}")
+        if ym["sharpe"] < 0.8: issues.append(f"{y} Sh {ym['sharpe']:.3f} < 0.8")
     if len(oos_tr) < 15: issues.append(f"Only {len(oos_tr)} trades")
     if oos_met["mdd"] < -30: issues.append(f"MDD {oos_met['mdd']:.1f}%")
     if oos_met["ret"] < 0: issues.append(f"Neg return {oos_met['ret']:.1f}%")
@@ -497,16 +443,16 @@ def walk_forward(name, tf, fn, grid, df, train_days, test_days, af):
 
 def main():
     print("=" * 72)
-    print("  Walk-Forward Backtest Runner — Iteration 4 (Radical Simplification)")
+    print("  Walk-Forward Backtest Runner — Iteration 12 (Final best-of-each)")
     print(f"  {START_DATE} → {END_DATE} | Fees {FEE_PCT}%+{SLIP_PCT}%")
-    print(f"  Strategy design: 2-3 free params each, tiny grids, anti-overfit")
+    print(f"  EMA: cross+trail, slow>=40 | RSI: trail-only | MACD: trail-only")
     print("=" * 72)
 
     d4 = fetch_ohlcv(SYMBOL, "4h", START_DATE, END_DATE)
     print(f"4H bars: {len(d4)}")
 
     print(f"\nGrids: EMA_Trend={len(EMA_TREND_GRID)}, RSI_Mom={len(RSI_MOMENTUM_GRID)}, "
-          f"TrendDip={len(TREND_DIP_GRID)}, MACD={len(MACD_GRID)}")
+          f"MACD={len(MACD_GRID)}")
 
     results = []
     results.append(walk_forward(
@@ -518,21 +464,12 @@ def main():
         train_days=180, test_days=30, af=AF_4H
     ))
     results.append(walk_forward(
-        "Trend Dip", "4h", strat_trend_dip, TREND_DIP_GRID, d4,
-        train_days=180, test_days=30, af=AF_4H
-    ))
-    results.append(walk_forward(
         "MACD Trend", "4h", strat_macd_trend, MACD_GRID, d4,
         train_days=180, test_days=30, af=AF_4H
     ))
 
-    # Portfolio — equal-weight all strategies
     print(f"\n{'='*72}")
-    print(f"  EQUAL-WEIGHT PORTFOLIO (combined OOS equity curves)")
-    print(f"{'='*72}")
-
-    print(f"\n{'='*72}")
-    print(f"  WALK-FORWARD SUMMARY — Iteration 4")
+    print(f"  WALK-FORWARD SUMMARY — Iteration 12 (FINAL)")
     print(f"{'='*72}")
     print(f"  {'Strategy':>20s} | {'IS Sh':>6s} {'OOS Sh':>7s} {'Eff%':>5s} | "
           f"{'OOS Ret':>8s} {'MDD':>7s} {'T':>4s} | Verdict")

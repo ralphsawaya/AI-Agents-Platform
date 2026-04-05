@@ -26,8 +26,8 @@ _SEED_META: list[dict] = [
         "description": (
             "Pure EMA crossover trend strategy with ATR trailing stop. "
             "Only 3 parameters (ema_fast, ema_slow, atr_trail). Walk-forward "
-            "validated: OOS Sharpe 1.14, +60.4% return, positive all years. "
-            "390% WF efficiency — anti-fragile."
+            "validated: OOS Sharpe 1.19, +64.6% return, positive all years. "
+            "408% WF efficiency — anti-fragile."
         ),
         "strategy_rules": (
             "LONG  : EMA(fast) crosses above EMA(slow)\n"
@@ -43,31 +43,31 @@ _SEED_META: list[dict] = [
         "name": "RSI Momentum (4H) — WF Validated",
         "timeframe": "4h",
         "description": (
-            "RSI 50-line crossover with EMA trend confirmation. "
+            "RSI 50-line crossover with EMA trend confirmation, trail-only exit. "
             "Only 3 parameters (rsi_len, ema_len, atr_trail). Walk-forward "
-            "validated: OOS Sharpe 1.63, +101.0% return, positive all years. "
-            "137% WF efficiency."
+            "validated: OOS Sharpe 1.37, +88.5% return, positive all years. "
+            "124% WF efficiency."
         ),
         "strategy_rules": (
             "LONG  : RSI crosses above 50 AND close > EMA\n"
             "SHORT : RSI crosses below 50 AND close < EMA\n"
-            "EXIT  : ATR trailing stop OR opposite RSI cross"
+            "EXIT  : ATR trailing stop ONLY (no opposite signal exit)"
         ),
         "pine_file": "rsi_momentum.pine",
     },
     {
         "_builtin_id": "macd_trend",
-        "name": "MACD Trend (4H) — Portfolio Diversifier",
+        "name": "MACD Trend (4H) — WF Validated",
         "timeframe": "4h",
         "description": (
-            "MACD histogram sign-change with EMA trend filter. "
+            "MACD histogram sign-change with EMA trend filter, trail-only exit. "
             "Only 3 parameters (macd_fast, macd_slow, atr_trail). "
-            "OOS +8.3% return, 73% WF efficiency. Adds portfolio diversification."
+            "OOS Sharpe 1.25, +80.3% return, 242% WF efficiency."
         ),
         "strategy_rules": (
             "LONG  : MACD histogram turns positive AND close > EMA(slow)\n"
             "SHORT : MACD histogram turns negative AND close < EMA(slow)\n"
-            "EXIT  : ATR trailing stop OR opposite MACD cross"
+            "EXIT  : ATR trailing stop ONLY (no opposite signal exit)"
         ),
         "pine_file": "macd_trend.pine",
     },

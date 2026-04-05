@@ -44,7 +44,7 @@ The execution pipeline is a **one-shot** process that handles a single trade sig
 1. The platform's webhook endpoint (`POST /api/webhook/tradingview`) is always listening as long as the server is running.
 2. When TradingView fires a webhook, the platform validates the secret, checks the kill switch, deduplicates the signal, and matches the signal's `strategy_name` against the currently active strategy. For **entry signals** (open long or open short), only the active strategy is accepted. For **exit signals** (close / reduce), the platform also checks whether the signal's strategy has an open position — if so, the signal is allowed through even after a strategy switch, so the strategy that opened a position can close it.
 3. If the signal matches (or is an exit passthrough), the platform **spawns** the execution pipeline as a subprocess for that specific signal.
-4. **The Risk Manager** fetches the Binance USDT-M Futures account balance, fetches ATR on the **4H timeframe** (all strategies operate on 4H), calculates strategy-aware position sizing at 2% risk per trade, checks drawdown limits (10% max), verifies open position caps (3 max), and either approves or rejects the trade. Stop-loss distances are tailored per strategy (e.g. wider 3× ATR "disaster stop" for `ema_trend` and `macd_trend` since their Pine Script trailing stops handle normal exits; 2.5× ATR for `rsi_momentum`).
+4. **The Risk Manager** fetches the Binance USDT-M Futures account balance, fetches ATR on the **4H timeframe** (all strategies operate on 4H), calculates strategy-aware position sizing at 2% risk per trade, checks drawdown limits (10% max), verifies open position caps (3 max), and either approves or rejects the trade. Stop-loss distances are 3× ATR for all strategies — a wide "disaster stop" since Pine Script trailing stops handle normal exits. RSI and MACD use trail-only exits (no opposite signal close), so the disaster stop is the sole API-side risk control.
 5. **The Executor** places a market order on **Binance USDT-M Futures**, polls for confirmation, records the fill in MongoDB, and sets protective orders (e.g. OCO stop-loss / take-profit) appropriate for futures.
 6. The pipeline exits. The next webhook will spawn a new execution pipeline.
 
@@ -188,9 +188,9 @@ trading_agents/
 │       ├── signals.html       Recent trade signals table
 │       └── strategy.html      Strategy selection history
 ├── strategies/                TradingView Pine Script strategies (walk-forward validated)
-│   ├── ema_trend.pine         4H — pure EMA crossover with ATR trailing stop (OOS Sharpe 1.14)
-│   ├── rsi_momentum.pine      4H — RSI 50-line crossover + EMA confirmation (OOS Sharpe 1.63)
-│   └── macd_trend.pine        4H — MACD histogram sign-change + EMA filter (portfolio diversifier)
+│   ├── ema_trend.pine         4H — EMA cross + cross+trail exit (OOS Sharpe 1.19)
+│   ├── rsi_momentum.pine      4H — RSI 50-line + EMA; trail-only exit (OOS Sharpe 1.37)
+│   └── macd_trend.pine        4H — MACD histogram + EMA; trail-only exit (OOS Sharpe 1.25)
 ├── tests/
 │   └── test_pipeline.py       State schema and mapping tests
 ├── requirements.txt           Python dependencies
@@ -283,17 +283,25 @@ Three walk-forward validated TradingView strategies in `strategies/` send webhoo
 
 > **Design philosophy:** Each strategy uses only **2–3 tunable parameters** (plus fixed ATR length). This radical simplification was the key to surviving walk-forward validation — strategies with 5+ parameters consistently overfit during training and degraded on unseen data.
 
-| Strategy | Regime(s) | Timeframe | OOS Sharpe | OOS Return | WF Efficiency | Entry logic (bidirectional) |
-|----------|-----------|-----------|------------|------------|---------------|----------------------------|
-| `ema_trend` | Uptrend, Downtrend | **4H** | 1.14 | +60.4% | 390% | EMA fast crosses above/below EMA slow → long/short; flips directly on cross |
-| `rsi_momentum` | All regimes | **4H** | 1.63 | +101.0% | 137% | RSI crosses above 50 + price > EMA → long; RSI crosses below 50 + price < EMA → short |
-| `macd_trend` | Uptrend, Downtrend, Volatile Breakout | **4H** | — | +8.3% | 73% | MACD histogram turns positive + price > EMA → long; histogram turns negative + price < EMA → short |
+| Strategy | Regime(s) | Timeframe | OOS Sharpe | OOS Return | OOS MDD | Trades | WF Efficiency | Exit | Entry logic (bidirectional) |
+|----------|-----------|-----------|------------|------------|---------|--------|---------------|------|----------------------------|
+| `ema_trend` | Uptrend, Downtrend | **4H** | 1.19 | +64.6% | -18.3% | 55 | 408% | **Cross+trail** — opposite EMA cross **or** ATR trail stop | EMA fast crosses above/below EMA slow → long/short |
+| `rsi_momentum` | All regimes | **4H** | 1.37 | +88.5% | -23.3% | 35 | 124% | **Trail-only** — ATR trailing stop only (no opposite RSI exit) | RSI crosses above 50 + price > EMA → long; RSI crosses below 50 + price < EMA → short |
+| `macd_trend` | Uptrend, Downtrend, Volatile Breakout | **4H** | 1.25 | +80.3% | -19.9% | 33 | 242% | **Trail-only** — ATR trailing stop only (no opposite MACD exit) | MACD histogram turns positive + price > EMA → long; histogram turns negative + price < EMA → short |
+
+**Per-year OOS Sharpe** (stitched walk-forward): `ema_trend` — 2024 = 1.93, 2025 = 0.96, 2026 = 1.22; `rsi_momentum` — 2024 = 3.12, 2025 = 0.63, 2026 = 1.85; `macd_trend` — 2024 = 3.99, 2025 = 0.13, 2026 = 2.07.
+
+**Trade quality (OOS):** `ema_trend` — win rate 32.7%, avg win +5.05%, avg loss -2.29%; `rsi_momentum` — 45.7%, +7.28%, -4.19%; `macd_trend` — 36.4%, +8.04%, -3.27%.
+
+**Optimisation grids (walk-forward):** `ema_trend` — `ema_fast` 8–20, `ema_slow` 40–60, `atr_trail` 2.0–5.0; `rsi_momentum` — `rsi_len` 14–24, `ema_len` 40–60, `atr_trail` 3.0–5.0; `macd_trend` — `macd_fast` 8–16, `macd_slow` 20–34, `atr_trail` 3.0–5.0.
+
+> **Change vs. earlier docs:** `rsi_momentum` and `macd_trend` now use **trail-only** exits (ATR trailing stop only) instead of also exiting on opposite RSI/MACD signals. That single change cut whipsaw damage in choppy markets and materially improved out-of-sample results.
 
 ### Strategy Parameters
 
 #### `ema_trend.pine` (4-hour timeframe) — Walk-Forward Validated
 
-Pure EMA crossover trend strategy. Flips directly between long and short on EMA cross, with ATR trailing stop as risk management. On the execution side, the OCO is placed as a wide 3× ATR "disaster stop" — the Pine trailing stop handles normal exits via webhook.
+Pure EMA crossover trend strategy. Exits on **cross+trail**: either an opposite-direction EMA cross (position flip) **or** the ATR trailing stop — whichever comes first. On the execution side, the OCO is placed as a wide 3× ATR "disaster stop" — the Pine trailing stop handles normal exits via webhook.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -304,7 +312,7 @@ Pure EMA crossover trend strategy. Flips directly between long and short on EMA 
 
 #### `rsi_momentum.pine` (4-hour timeframe) — Walk-Forward Validated
 
-RSI 50-line crossover with EMA trend confirmation. The strongest standalone performer in walk-forward testing. Works across all market regimes and is the recommended default strategy.
+RSI 50-line crossover with EMA trend confirmation. Uses a **trail-only** exit (ATR trailing stop only — no exit on opposite RSI cross), which reduced chop-driven whipsaws versus the previous design. Strong walk-forward results across regimes; a solid default when diversification from pure trend-following is useful.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -313,9 +321,9 @@ RSI 50-line crossover with EMA trend confirmation. The strongest standalone perf
 | ATR Length | 14 | ATR period for trailing stop |
 | ATR Trailing Stop Multiplier | 3.0 | Trailing stop distance as multiple of ATR |
 
-#### `macd_trend.pine` (4-hour timeframe) — Portfolio Diversifier
+#### `macd_trend.pine` (4-hour timeframe) — Walk-Forward Validated
 
-MACD histogram sign-change with EMA trend filter. While not the strongest standalone performer, it provides portfolio diversification due to uncorrelated signal generation compared to EMA and RSI-based strategies.
+MACD histogram sign-change with EMA trend filter. **Trail-only** exit (ATR trailing stop only — no exit on opposite MACD cross), matching the RSI improvement: fewer false exits in range-bound tape. Complements EMA and RSI systems with partly uncorrelated signal timing.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -374,9 +382,9 @@ Each Pine Script strategy is translated to Python with the same core logic (incl
 
 | Strategy | Timeframe | Indicators | Entry | Exit | Optimised Parameters |
 |----------|-----------|------------|-------|------|---------------------|
-| `ema_trend` | **4h** | EMA fast, EMA slow, ATR | EMA fast crosses above slow → long; crosses below → short; flips directly | ATR trailing stop or opposite EMA cross | `ema_fast`, `ema_slow`, `atr_trail` |
-| `rsi_momentum` | **4h** | RSI, EMA, ATR | RSI crosses above 50 + price > EMA → long; RSI crosses below 50 + price < EMA → short | ATR trailing stop or opposite RSI cross | `rsi_len`, `ema_len`, `atr_trail` |
-| `macd_trend` | **4h** | MACD histogram, EMA, ATR | MACD histogram turns positive + price > EMA → long; histogram turns negative + price < EMA → short | ATR trailing stop or opposite MACD cross | `macd_fast`, `macd_slow`, `atr_trail` |
+| `ema_trend` | **4h** | EMA fast, EMA slow, ATR | EMA fast crosses above slow → long; crosses below → short | **Cross+trail:** opposite EMA cross **or** ATR trailing stop | `ema_fast`, `ema_slow`, `atr_trail` |
+| `rsi_momentum` | **4h** | RSI, EMA, ATR | RSI crosses above 50 + price > EMA → long; RSI crosses below 50 + price < EMA → short | **Trail-only:** ATR trailing stop only | `rsi_len`, `ema_len`, `atr_trail` |
+| `macd_trend` | **4h** | MACD histogram, EMA, ATR | MACD histogram turns positive + price > EMA → long; histogram turns negative + price < EMA → short | **Trail-only:** ATR trailing stop only | `macd_fast`, `macd_slow`, `atr_trail` |
 
 Legacy strategies are still available in the backtest engine for comparison but are no longer seeded as defaults.
 

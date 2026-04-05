@@ -839,15 +839,15 @@ details[open] .bt-pine-chevron { transform: rotate(90deg); }
 
         <div class="bt-slider-group">
             <label>Training window (days)</label>
-            <span class="bt-slider-val" id="train-val">14</span>
-            <input type="range" id="bt-train" min="7" max="365" value="14"
+            <span class="bt-slider-val" id="train-val">180</span>
+            <input type="range" id="bt-train" min="7" max="365" value="180"
                    oninput="document.getElementById('train-val').textContent=this.value;_bt_updateSlider(this)">
         </div>
 
         <div class="bt-slider-group">
             <label>Blind test window (days)</label>
-            <span class="bt-slider-val" id="test-val">3</span>
-            <input type="range" id="bt-test" min="1" max="90" value="3"
+            <span class="bt-slider-val" id="test-val">30</span>
+            <input type="range" id="bt-test" min="1" max="90" value="30"
                    oninput="document.getElementById('test-val').textContent=this.value;_bt_updateSlider(this)">
         </div>
 
@@ -1095,7 +1095,7 @@ SL/TP : ATR-based dynamic levels</textarea>
         document.getElementById('bt-delete-btn').classList.remove('bt-btn-off');
         document.getElementById('bt-delete-btn').title = 'Delete strategy';
 
-        var defs = _SLIDER_DEFAULTS[strat.id] || {train: 60, test: 14};
+        var defs = _SLIDER_DEFAULTS[strat.id] || {train: 180, test: 30};
         _setSlider('bt-train', defs.train);
         _setSlider('bt-test', defs.test);
 

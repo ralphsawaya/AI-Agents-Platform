@@ -3,9 +3,9 @@
 ATR is fetched on 4H for all WF-validated strategies (ema_trend,
 rsi_momentum, macd_trend) — see fetch_account.py.
 
-  - ema_trend: 3x ATR — rides trends with wide trail, OCO disaster stop.
-  - rsi_momentum: 2.5x ATR — momentum with moderate room for volatility.
-  - macd_trend: 3x ATR — similar to ema_trend, trend-riding.
+  - ema_trend: 3x ATR — rides trends with wide trail, cross+trail exit.
+  - rsi_momentum: 3x ATR — trail-only exit, needs wider disaster stop.
+  - macd_trend: 3x ATR — trail-only exit, needs wider disaster stop.
 """
 
 from shared.config import MAX_RISK_PER_TRADE, MAX_OPEN_POSITIONS, MAX_DRAWDOWN
@@ -15,13 +15,13 @@ logger = get_logger("risk_manager.calculate_risk")
 
 STRATEGY_ATR_MULT = {
     "ema_trend": 3.0,
-    "rsi_momentum": 2.5,
+    "rsi_momentum": 3.0,
     "macd_trend": 3.0,
 }
 
 STRATEGY_TP_RATIO = {
     "ema_trend": 3.0,
-    "rsi_momentum": 2.5,
+    "rsi_momentum": 3.0,
     "macd_trend": 3.0,
 }
 

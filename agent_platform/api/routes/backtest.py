@@ -1,11 +1,11 @@
 """Walk-Forward Analysis backtesting API — Binance USDT-M Futures edition.
 
-Translates strategies (pullback, trend_following, mean_reversion,
-swing_momentum) from teams/trading_agents into Python with
-bidirectional (long + short) support and runs walk-forward optimisation
-on OHLCV data fetched from Binance via ccxt.
+Implements three walk-forward validated strategies for BTC/USDT 4H:
+- EMA Trend: cross+trail exit, ema_slow>=40
+- RSI Momentum: trail-only exit (no opposite RSI cross)
+- MACD Trend: trail-only exit (no opposite histogram cross)
 
-Legacy strategies (breakout, accumulation) are still supported for
+Legacy strategies (breakout, accumulation, etc.) are still supported for
 backward compatibility with existing backtest runs.
 """
 
@@ -410,13 +410,13 @@ def _execute(
                     direction = -1; trail = close[i] + atr_v[i] * trail_mult; pos[i] = -1
             elif direction == 1:
                 trail = max(trail, close[i] - atr_v[i] * trail_mult)
-                if close[i] < trail or bear_cross:
+                if close[i] < trail:
                     direction = 0
                 else:
                     pos[i] = 1
             elif direction == -1:
                 trail = min(trail, close[i] + atr_v[i] * trail_mult)
-                if close[i] > trail or bull_cross:
+                if close[i] > trail:
                     direction = 0
                 else:
                     pos[i] = -1
@@ -445,13 +445,13 @@ def _execute(
                     direction = -1; trail = close[i] + atr_v[i] * trail_mult; pos[i] = -1
             elif direction == 1:
                 trail = max(trail, close[i] - atr_v[i] * trail_mult)
-                if close[i] < trail or bear_cross:
+                if close[i] < trail:
                     direction = 0
                 else:
                     pos[i] = 1
             elif direction == -1:
                 trail = min(trail, close[i] + atr_v[i] * trail_mult)
-                if close[i] > trail or bull_cross:
+                if close[i] > trail:
                     direction = 0
                 else:
                     pos[i] = -1
@@ -694,23 +694,23 @@ _ACCUM_GRID = [
 _EMA_TREND_GRID = [
     {"ema_fast": f, "ema_slow": s, "atr_trail": t}
     for f in (8, 10, 12, 15, 20)
-    for s in (30, 40, 50, 60)
+    for s in (40, 50, 60)
     for t in (2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
     if f < s
 ]
 
 _RSI_MOMENTUM_GRID = [
     {"rsi_len": r, "ema_len": e, "atr_trail": t}
-    for r in (12, 14, 16, 18, 20, 24)
-    for e in (30, 40, 50, 60)
-    for t in (2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
+    for r in (14, 16, 18, 20, 24)
+    for e in (40, 50, 60)
+    for t in (3.0, 3.5, 4.0, 5.0)
 ]
 
 _MACD_TREND_GRID = [
     {"macd_fast": f, "macd_slow": s, "atr_trail": t}
     for f in (8, 10, 12, 16)
     for s in (20, 26, 34)
-    for t in (2.0, 2.5, 3.0, 3.5, 4.0, 5.0)
+    for t in (3.0, 3.5, 4.0, 5.0)
     if f < s
 ]
 
@@ -843,8 +843,8 @@ def _walk_forward(cfg: dict):
     ticker = cfg.get("ticker", "BTCUSDT")
     start = cfg.get("start", "2021-01-01")
     end = cfg.get("end", "2026-01-01")
-    train_days = int(cfg.get("train_days", 90))
-    test_days = int(cfg.get("test_days", 14))
+    train_days = int(cfg.get("train_days", 180))
+    test_days = int(cfg.get("test_days", 30))
     strategy = cfg.get("strategy", "trend_following")
     fee = float(cfg.get("exchange_fee", 0.04))
     slip = float(cfg.get("slippage", 0.01))

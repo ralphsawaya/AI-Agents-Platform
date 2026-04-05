@@ -1,8 +1,8 @@
 // This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
 // © AI-Agents-Platform — RSI Momentum Strategy (Walk-Forward Validated)
 // Designed for BTC/USDT on 4H timeframe (Binance USDT-M Futures)
-// Bidirectional: RSI 50-line crossover with EMA trend confirmation
-// OOS Sharpe 1.63 | +101.0% return | 137% WF efficiency
+// Bidirectional: RSI 50-line crossover with EMA trend filter, trail-only exit
+// OOS Sharpe 1.37 | +88.5% return | 124% WF efficiency | Trail-only exit
 
 //@version=6
 strategy("RSI Momentum [AI-Agents]", overlay=true, default_qty_type=strategy.percent_of_equity, default_qty_value=100, commission_value=0.04)
@@ -45,14 +45,10 @@ else
 // ── Strategy Execution ──────────────────────────────────────────────
 alertMsg(action) => '{"secret":"' + webhookSecret + '","strategy_name":"rsi_momentum","action":"' + action + '","ticker":"' + syminfo.ticker + '","price":"' + str.tostring(close) + '","time":"' + str.tostring(time) + '"}'
 
-if longEntry and strategy.position_size <= 0
-    if strategy.position_size < 0
-        strategy.close("RM Short", comment="RSI Cross", alert_message=alertMsg("close_sell"))
+if longEntry and strategy.position_size == 0
     strategy.entry("RM Long", strategy.long, alert_message=alertMsg("buy"))
 
-if shortEntry and strategy.position_size >= 0
-    if strategy.position_size > 0
-        strategy.close("RM Long", comment="RSI Cross", alert_message=alertMsg("close_buy"))
+if shortEntry and strategy.position_size == 0
     strategy.entry("RM Short", strategy.short, alert_message=alertMsg("sell"))
 
 if strategy.position_size > 0 and not na(trailLong) and close <= trailLong
