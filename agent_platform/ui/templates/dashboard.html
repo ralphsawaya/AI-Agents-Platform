@@ -74,12 +74,20 @@
 <script>
 let currentView = 'card';
 let selectedFile = null;
+let hiddenTeams = new Set();
 
 function setView(view, btn) {
     currentView = view;
     document.querySelectorAll('.view-toggle button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     renderAgents(window._agents || []);
+}
+
+async function loadVisibility() {
+    const res = await API.get('/api/settings/visibility');
+    if (res.success && res.data.hidden_teams) {
+        hiddenTeams = new Set(res.data.hidden_teams);
+    }
 }
 
 async function loadAgents() {
@@ -92,9 +100,10 @@ async function loadAgents() {
     if (tags) params.set('tags', tags);
     const res = await API.get('/api/agents?' + params);
     if (res.success) {
-        window._agents = res.data;
-        renderAgents(res.data);
-        updateStats(res.data);
+        const visible = res.data.filter(a => !hiddenTeams.has(a._id));
+        window._agents = visible;
+        renderAgents(visible);
+        updateStats(visible);
     }
 }
 
@@ -200,7 +209,7 @@ async function checkAlerts() {
     }
 }
 
-loadAgents();
+loadVisibility().then(() => loadAgents());
 checkAlerts();
 setInterval(loadAgents, 20000);
 setInterval(checkAlerts, 30000);

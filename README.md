@@ -211,7 +211,7 @@ If you're not using Cursor, you'll need to either re-zip and re-upload, or manua
 ┌──────────────────────────────────────────────────────┐
 │                     Browser UI                       │
 │  Dashboard │ Agent Detail (+Custom Tabs) │ Monitor   │
-│  Scheduler │ Graph                                   │
+│  Scheduler │ Settings │ Graph                        │
 └─────────────────────┬────────────────────────────────┘
                       │ HTTP / WebSocket
 ┌─────────────────────▼────────────────────────────────┐
@@ -259,6 +259,9 @@ Live table of all running agent teams showing CPU%, memory (MB), elapsed time, a
 
 ### Scheduler
 Global schedule management across all agent teams. Toggle enable/disable, view next run times.
+
+### Settings
+Platform-level settings. Currently includes **Dashboard Visibility** — toggle which agent teams are shown or hidden on the Dashboard. Hidden teams remain accessible via direct links and other pages; only the Dashboard listing is filtered. Visibility preferences are persisted in MongoDB.
 
 ### Relationship Graph
 Interactive Cytoscape.js visualisation of inter-agent relationships. Three layout options (hierarchical, force-directed, circular). Click nodes to navigate to agent details.

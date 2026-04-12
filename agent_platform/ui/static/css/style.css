@@ -1552,3 +1552,63 @@ label {
     font-size: 0.82rem;
     font-style: italic;
 }
+
+/* ── Settings page ── */
+.settings-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem 1.75rem;
+    max-width: 720px;
+}
+
+.settings-section-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.35rem;
+}
+
+.settings-section-desc {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-bottom: 1.25rem;
+    line-height: 1.5;
+}
+
+.settings-team-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.settings-team-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.settings-team-row:last-child {
+    border-bottom: none;
+}
+
+.settings-team-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.settings-team-name {
+    font-size: 0.88rem;
+    font-weight: 550;
+    color: var(--text);
+}
+
+.settings-team-meta {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Settings — AI Agent Platform{% endblock %}
+{% block content %}
+<div class="page-header">
+    <h1>Settings</h1>
+</div>
+
+<div class="settings-section">
+    <h2 class="settings-section-title">Dashboard Visibility</h2>
+    <p class="settings-section-desc">Choose which agent teams appear on the Dashboard. Hidden teams are still accessible via direct links.</p>
+
+    <div id="team-list" class="settings-team-list">
+        <p class="text-dim">Loading teams…</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let hiddenTeams = new Set();
+
+async function loadSettings() {
+    const [agentsRes, visRes] = await Promise.all([
+        API.get('/api/agents'),
+        API.get('/api/settings/visibility'),
+    ]);
+
+    if (!agentsRes.success) { toast('Failed to load agents', 'error'); return; }
+
+    if (visRes.success && visRes.data.hidden_teams) {
+        hiddenTeams = new Set(visRes.data.hidden_teams);
+    }
+
+    renderTeams(agentsRes.data);
+}
+
+function renderTeams(agents) {
+    const el = document.getElementById('team-list');
+    if (!agents.length) {
+        el.innerHTML = '<p class="text-dim">No agent teams registered yet.</p>';
+        return;
+    }
+
+    el.innerHTML = agents.map(a => {
+        const visible = !hiddenTeams.has(a._id);
+        return `
+        <div class="settings-team-row">
+            <div class="settings-team-info">
+                <span class="settings-team-name">${a.name}</span>
+                <span class="settings-team-meta">${a.agent_folders ? a.agent_folders.length + ' agent(s)' : ''} · ${statusBadge(a.status)}</span>
+            </div>
+            <label class="toggle" title="${visible ? 'Visible on Dashboard' : 'Hidden from Dashboard'}">
+                <input type="checkbox" ${visible ? 'checked' : ''} onchange="toggleVisibility('${a._id}', this.checked)">
+                <span class="slider"></span>
+            </label>
+        </div>`;
+    }).join('');
+}
+
+async function toggleVisibility(agentId, visible) {
+    const res = await API.put('/api/settings/visibility', { agent_id: agentId, visible });
+    if (res.success) {
+        if (visible) {
+            hiddenTeams.delete(agentId);
+        } else {
+            hiddenTeams.add(agentId);
+        }
+        toast(visible ? 'Team visible on Dashboard' : 'Team hidden from Dashboard', 'success');
+    } else {
+        toast('Failed to update visibility', 'error');
+    }
+}
+
+loadSettings();
+</script>
+{% endblock %}
