@@ -1,0 +1,6 @@
+{
+    "tabs": [
+        { "id": "trip_planner", "label": "Trip Planner" },
+        { "id": "trip_reservations", "label": "Reservations" }
+    ]
+}

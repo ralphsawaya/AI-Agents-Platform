@@ -324,6 +324,26 @@
         </div>
     </div>
 
+    <!-- Trip-specific settings (only visible for trip teams) -->
+    <div class="ts-trip-section" id="ts-trip-section" style="display:none;">
+        <div class="ts-section">
+            <div class="ts-section-title">Trip Sample Data</div>
+            <div style="padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;">
+                <p style="font-size:0.84rem;color:#999;margin:0 0 14px 0;">
+                    Load 1,000 sample documents each for flights, hotels, and car rentals into MongoDB Atlas.
+                    This creates vector search indexes for the Trip Planner to work.
+                    Requires both <strong>Atlas MongoDB URI</strong> and <strong>Voyage AI API Key</strong> to be configured above.
+                </p>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                    <button class="ts-btn-save" id="ts-trip-seed-btn" onclick="_ts_seedTripData()" style="background:#a6e3a1;color:#1e1e2e;">
+                        Load Sample Data
+                    </button>
+                    <span id="ts-trip-seed-status" style="font-size:0.82rem;color:#999;"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Trading-specific settings (only visible for trading teams) -->
     <div class="ts-trading-section" id="ts-trading-section">
         <div class="ts-section">
@@ -1839,6 +1859,120 @@ async function _ts_saveMetadata() {
         return false;
     }
 
+    function _isTrip(agent) {
+        if ((agent.tags || []).includes('trip')) return true;
+        const tabs = agent.custom_tabs || [];
+        if (tabs.some(t => t.id === 'trip_planner')) return true;
+        if ((agent.root_folder || '').includes('trip')) return true;
+        return false;
+    }
+
+    async function _ts_initTripSection() {
+        const statusEl = document.getElementById('ts-trip-seed-status');
+        const btn = document.getElementById('ts-trip-seed-btn');
+        statusEl.textContent = 'Checking...';
+        try {
+            const res = await API.get(`/api/trip/${AGENT_ID}/seed/status`);
+            if (res.success && res.data) {
+                if (res.data.seeded) {
+                    const c = res.data.counts || {};
+                    statusEl.style.color = '#4ade80';
+                    statusEl.textContent = `Data already loaded (${(c.trip_flights||0).toLocaleString()} flights, ${(c.trip_hotels||0).toLocaleString()} hotels, ${(c.trip_cars||0).toLocaleString()} cars)`;
+                    btn.textContent = 'Reload Sample Data';
+                    btn.style.background = '#45475a';
+                    btn.style.color = '#cdd6f4';
+                } else {
+                    statusEl.style.color = '#999';
+                    const total = res.data.total || 0;
+                    statusEl.textContent = total > 0
+                        ? `Partial data found (${total} docs). Click to load full dataset.`
+                        : 'No data loaded yet.';
+                }
+            } else {
+                statusEl.style.color = '#f87171';
+                statusEl.textContent = res.error || 'Could not check status';
+            }
+        } catch (e) {
+            statusEl.style.color = '#f87171';
+            statusEl.textContent = 'Failed to check status';
+        }
+    }
+
+    window._ts_seedTripData = async function() {
+        const btn = document.getElementById('ts-trip-seed-btn');
+        const statusEl = document.getElementById('ts-trip-seed-status');
+
+        btn.disabled = true;
+        btn.textContent = 'Starting...';
+        statusEl.style.color = '#89b4fa';
+        statusEl.textContent = 'Initiating seed...';
+
+        try {
+            const res = await API.post(`/api/trip/${AGENT_ID}/seed`);
+            if (!res.success) {
+                btn.disabled = false;
+                btn.textContent = 'Load Sample Data';
+                statusEl.style.color = '#f87171';
+                statusEl.textContent = res.error || 'Failed to start';
+                return;
+            }
+
+            if (res.data && res.data.already_seeded) {
+                btn.disabled = false;
+                btn.textContent = 'Reload Sample Data';
+                btn.style.background = '#45475a';
+                btn.style.color = '#cdd6f4';
+                statusEl.style.color = '#4ade80';
+                statusEl.textContent = `Data already loaded (${res.data.total} documents)`;
+                return;
+            }
+
+            await _ts_pollSeedProgress(btn, statusEl);
+        } catch (e) {
+            btn.disabled = false;
+            btn.textContent = 'Load Sample Data';
+            statusEl.style.color = '#f87171';
+            statusEl.textContent = 'Request failed: ' + (e.message || e);
+        }
+    };
+
+    async function _ts_pollSeedProgress(btn, statusEl) {
+        const maxAttempts = 120;
+        for (let i = 0; i < maxAttempts; i++) {
+            await new Promise(r => setTimeout(r, 3000));
+            try {
+                const res = await API.get(`/api/trip/${AGENT_ID}/seed/progress`);
+                if (!res.success || !res.data) continue;
+
+                const { status, detail, error } = res.data;
+                if (status === 'running') {
+                    statusEl.style.color = '#89b4fa';
+                    statusEl.innerHTML = `<span style="display:inline-block;width:14px;height:14px;border:2px solid #6c7086;border-top-color:#89b4fa;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px;"></span>${detail || 'Working...'}`;
+                } else if (status === 'complete') {
+                    btn.disabled = false;
+                    btn.textContent = 'Reload Sample Data';
+                    btn.style.background = '#45475a';
+                    btn.style.color = '#cdd6f4';
+                    statusEl.style.color = '#4ade80';
+                    statusEl.textContent = detail || 'Sample data loaded successfully!';
+                    toast('Trip sample data loaded successfully', 'success');
+                    return;
+                } else if (status === 'error') {
+                    btn.disabled = false;
+                    btn.textContent = 'Load Sample Data';
+                    statusEl.style.color = '#f87171';
+                    statusEl.textContent = 'Error: ' + (error || 'Unknown error');
+                    toast('Failed to load sample data', 'error');
+                    return;
+                }
+            } catch (_) {}
+        }
+        btn.disabled = false;
+        btn.textContent = 'Load Sample Data';
+        statusEl.style.color = '#fbbf24';
+        statusEl.textContent = 'Timed out waiting for seed to complete. Check server logs.';
+    }
+
     /* -- Integrations (API Keys) -- */
 
     const CATEGORY_ICONS = {
@@ -2021,6 +2155,10 @@ async function _ts_saveMetadata() {
         if (_isTrading(agent)) {
             document.getElementById('ts-trading-section').style.display = 'block';
             tsLoadTradingConfig();
+        }
+        if (_isTrip(agent)) {
+            document.getElementById('ts-trip-section').style.display = 'block';
+            _ts_initTripSection();
         }
     };
 })();

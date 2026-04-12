@@ -1,0 +1,6 @@
+name: agent_car
+role: car_rental_search
+description: Searches for rental cars using MongoDB Atlas vector search with Voyage AI embeddings
+model: voyage-3-lite
+temperature: 0.0
+max_tokens: 2048

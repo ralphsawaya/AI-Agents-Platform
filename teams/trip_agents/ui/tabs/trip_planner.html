@@ -1,0 +1,780 @@
+<!--
+  Trip Planner — Custom Tab
+  Split-panel layout: reservation results on the left, chatbot on the right.
+  Manages chat threads, search results, and reservation confirmation.
+-->
+<style>
+    .trip-wrapper { display: flex; gap: 16px; height: calc(100vh - 140px); font-family: system-ui, -apple-system, sans-serif; }
+    .trip-panel { background: #1e1e2e; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+    .trip-left { flex: 1; }
+    .trip-right { flex: 1; }
+
+    .panel-header { padding: 16px 20px; background: #27273a; font-weight: 600; font-size: 15px; color: #cdd6f4; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 10px; }
+    .panel-header .icon { font-size: 18px; }
+    .panel-body { flex: 1; overflow-y: auto; padding: 16px; }
+
+    /* Threads sidebar */
+    .threads-bar { display: flex; gap: 8px; padding: 10px 16px; background: #1e1e2e; border-bottom: 1px solid #313244; align-items: center; flex-wrap: wrap; }
+    .thread-chip { padding: 5px 12px; font-size: 12px; border-radius: 20px; background: #313244; color: #bac2de; cursor: pointer; border: 1px solid transparent; transition: all 0.15s; white-space: nowrap; }
+    .thread-chip:hover { background: #45475a; }
+    .thread-chip.active { background: #89b4fa; color: #1e1e2e; border-color: #89b4fa; }
+    .thread-chip .del { margin-left: 6px; opacity: 0.5; cursor: pointer; }
+    .thread-chip .del:hover { opacity: 1; }
+    .btn-new-thread { padding: 5px 14px; border-radius: 20px; background: #a6e3a1; color: #1e1e2e; border: none; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .btn-new-thread:hover { background: #94e2d5; }
+
+    /* Chat */
+    .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .chat-msg { padding: 10px 14px; border-radius: 12px; max-width: 88%; font-size: 13px; line-height: 1.5; word-wrap: break-word; }
+    .chat-msg.user { background: #89b4fa; color: #1e1e2e; align-self: flex-end; }
+    .chat-msg.assistant { background: #313244; color: #cdd6f4; align-self: flex-start; }
+    .chat-input-area { padding: 12px 16px; border-top: 1px solid #313244; display: flex; gap: 8px; }
+    .chat-input-area input { flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid #45475a; background: #313244; color: #cdd6f4; font-size: 13px; outline: none; }
+    .chat-input-area input:focus { border-color: #89b4fa; }
+    .chat-input-area button { padding: 10px 18px; border-radius: 8px; background: #89b4fa; color: #1e1e2e; border: none; font-weight: 600; font-size: 13px; cursor: pointer; }
+    .chat-input-area button:hover { background: #74c7ec; }
+    .chat-input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Results */
+    .results-section { margin-bottom: 20px; }
+    .results-section h3 { font-size: 14px; color: #89b4fa; margin: 0 0 10px 0; }
+    .result-card { background: #313244; border-radius: 8px; padding: 12px; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent; transition: all 0.15s; }
+    .result-card:hover { border-color: #585b70; }
+    .result-card.selected { border-color: #a6e3a1; background: #2a2a3a; }
+    .result-card .title { font-size: 13px; font-weight: 600; color: #cdd6f4; }
+    .result-card .detail { font-size: 12px; color: #9399b2; margin-top: 4px; }
+    .result-card .price { font-size: 14px; font-weight: 700; color: #a6e3a1; margin-top: 6px; }
+    .result-card .score { font-size: 11px; color: #6c7086; margin-top: 2px; }
+
+    .result-card .desc-toggle { display: inline-block; margin-top: 6px; font-size: 11px; color: #89b4fa; cursor: pointer; user-select: none; }
+    .result-card .desc-toggle:hover { text-decoration: underline; }
+    .result-card .desc-body { display: none; margin-top: 6px; padding: 8px 10px; background: #1e1e2e; border-radius: 6px; font-size: 12px; color: #a6adc8; line-height: 1.55; border-left: 3px solid #45475a; }
+    .result-card .desc-body.open { display: block; }
+
+    .btn-reserve { display: block; width: 100%; padding: 14px; border: none; border-radius: 8px; background: #a6e3a1; color: #1e1e2e; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 16px; }
+    .btn-reserve:hover { background: #94e2d5; }
+    .btn-reserve:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .reservation-banner { background: #a6e3a1; color: #1e1e2e; padding: 14px 20px; border-radius: 8px; font-weight: 600; text-align: center; margin-bottom: 16px; }
+    .cancellation-banner { background: #f38ba8; color: #1e1e2e; padding: 14px 20px; border-radius: 8px; font-weight: 600; text-align: center; margin-bottom: 16px; }
+    .update-banner { background: #89b4fa; color: #1e1e2e; padding: 14px 20px; border-radius: 8px; font-weight: 600; text-align: center; margin-bottom: 16px; }
+    .modify-header { background: #313244; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; font-size: 13px; color: #cdd6f4; line-height: 1.5; }
+    .modify-header strong { color: #89b4fa; }
+    .btn-update { display: block; width: 100%; padding: 14px; border: none; border-radius: 8px; background: #89b4fa; color: #1e1e2e; font-weight: 700; font-size: 15px; cursor: pointer; margin-top: 16px; }
+    .btn-update:hover { background: #74c7ec; }
+    .btn-update:disabled { opacity: 0.4; cursor: not-allowed; }
+    .empty-state { color: #6c7086; text-align: center; padding: 60px 20px; font-size: 14px; }
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #6c7086; border-top-color: #89b4fa; border-radius: 50%; animation: spin 0.7s linear infinite; margin-right: 6px; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Search progress */
+    .search-progress-bar { padding: 12px 0; }
+    .sp-item { padding: 8px 12px; font-size: 13px; color: #9399b2; display: flex; align-items: center; gap: 8px; }
+
+    /* Suggestions */
+    .suggestions-box { padding: 10px 16px; border-top: 1px solid #313244; background: #1e1e2e; }
+    .suggestions-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .suggestions-header .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6c7086; }
+    .suggestions-header .refresh-btn { background: none; border: none; color: #89b4fa; font-size: 13px; cursor: pointer; padding: 2px 6px; border-radius: 4px; transition: background 0.15s; }
+    .suggestions-header .refresh-btn:hover { background: #313244; }
+    .suggestions-header .refresh-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+    .suggestion-card { background: #313244; border: 1px solid #45475a; border-radius: 8px; padding: 8px 12px; margin-bottom: 6px; font-size: 12px; color: #bac2de; cursor: pointer; transition: all 0.15s; line-height: 1.4; }
+    .suggestion-card:hover { border-color: #89b4fa; background: #2a2a3a; color: #cdd6f4; }
+    .suggestion-card:last-child { margin-bottom: 0; }
+
+    /* Long-term memory */
+    .memory-box { padding: 8px 16px; border-top: 1px solid #313244; background: #1a1a2a; }
+    .memory-header { display: flex; justify-content: space-between; align-items: center; cursor: pointer; padding: 4px 0; }
+    .memory-header .label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6c7086; }
+    .memory-header .toggle { font-size: 11px; color: #6c7086; transition: transform 0.2s; }
+    .memory-items { display: none; padding: 6px 0; }
+    .memory-items.open { display: block; }
+    .memory-item { display: flex; align-items: baseline; gap: 6px; padding: 3px 0; font-size: 12px; color: #9399b2; }
+    .memory-item .cat { font-size: 10px; color: #89b4fa; background: #313244; padding: 1px 6px; border-radius: 4px; white-space: nowrap; }
+    .memory-clear-btn { background: none; border: 1px solid #45475a; color: #f38ba8; font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer; margin-top: 6px; }
+    .memory-clear-btn:hover { background: #313244; }
+    .memory-empty { font-size: 11px; color: #585b70; padding: 4px 0; font-style: italic; }
+</style>
+
+<div class="trip-wrapper">
+    <!-- LEFT: Search Results & Reservation -->
+    <div class="trip-panel trip-left">
+        <div class="panel-header"><span class="icon">📋</span> Search Results</div>
+        <div class="panel-body" id="resultsPanel">
+            <div class="empty-state">Send a message to search for flights, hotels, and cars.</div>
+        </div>
+    </div>
+
+    <!-- RIGHT: Chat -->
+    <div class="trip-panel trip-right">
+        <div class="panel-header"><span class="icon">💬</span> Chat <span id="llmBadge" style="margin-left:auto;font-size:11px;font-weight:600;color:#1e1e2e;background:linear-gradient(135deg,#89b4fa,#74c7ec);padding:3px 12px;border-radius:12px;letter-spacing:0.3px;"></span></div>
+        <div class="threads-bar" id="threadsBar">
+            <button class="btn-new-thread" onclick="createThread()">+ New</button>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            <div class="empty-state">Type a message below and press Send — a thread will be created automatically.</div>
+        </div>
+        <div class="suggestions-box" id="suggestionsBox">
+            <div class="suggestions-header">
+                <span class="label">💡 Try a prompt</span>
+                <button class="refresh-btn" id="suggestRefreshBtn" onclick="_tpRefreshSuggestions()" title="Get new suggestions">↻ New ideas</button>
+            </div>
+            <div id="suggestionsContainer"></div>
+        </div>
+        <div class="memory-box" id="memoryBox">
+            <div class="memory-header" onclick="_tpToggleMemory()">
+                <span class="label">🧠 What I remember about you</span>
+                <span class="toggle" id="memoryToggle">▸</span>
+            </div>
+            <div class="memory-items" id="memoryItems"></div>
+        </div>
+        <div class="chat-input-area">
+            <input id="chatInput" type="text" placeholder="Describe your ideal trip..."
+                   onkeydown="if(event.key==='Enter')sendMessage()" />
+            <button id="sendBtn" onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const BASE = `/api/trip/${typeof AGENT_ID !== 'undefined' ? AGENT_ID : ''}`;
+    let threads = [];
+    let activeThread = null;
+    let selected = { flight: null, hotel: null, car: null };
+    let latestResults = null;
+    let polling = false;
+
+    window.createThread = async function () {
+        try {
+            const res = await API.post(`${BASE}/threads`, { title: 'Trip ' + new Date().toLocaleDateString() });
+            if (res.success) {
+                await loadThreads();
+                selectThread(res.data.id);
+            }
+        } catch (e) { toast('Failed to create thread', 'error'); }
+    };
+
+    window.sendMessage = async function () {
+        const input = document.getElementById('chatInput');
+        const msg = input.value.trim();
+        if (!msg || polling) return;
+
+        if (!activeThread) {
+            try {
+                const tr = await API.post(`${BASE}/threads`, { title: 'Trip ' + new Date().toLocaleDateString() });
+                if (tr.success && tr.data && tr.data.id) {
+                    activeThread = tr.data.id;
+                    await loadThreads();
+                    renderThreads();
+                } else {
+                    toast('Failed to create thread', 'error');
+                    return;
+                }
+            } catch (e) {
+                toast('Failed to create thread', 'error');
+                return;
+            }
+        }
+
+        input.value = '';
+        appendChat('user', msg);
+
+        polling = true;
+        document.getElementById('sendBtn').disabled = true;
+        document.getElementById('sendBtn').textContent = '...';
+
+        try {
+            const res = await API.post(`${BASE}/threads/${activeThread}/messages`, { message: msg });
+            if (res.success && res.data && res.data.run_id) {
+                const mode = res.data.mode || 'chat';
+                if (mode === 'cancel' || mode === 'update') {
+                    await pollReservation(res.data.run_id);
+                } else if (mode === 'modify') {
+                    await pollRun(res.data.run_id);
+                } else {
+                    await pollRun(res.data.run_id);
+                }
+            } else {
+                appendChat('assistant', 'Failed to send: ' + ((res && res.error) || 'unknown error'));
+            }
+        } catch (e) {
+            appendChat('assistant', 'Something went wrong. Please try again.');
+        }
+
+        polling = false;
+        document.getElementById('sendBtn').disabled = false;
+        document.getElementById('sendBtn').textContent = 'Send';
+    };
+
+    let _partialRendered = { flights: false, hotels: false, cars: false };
+    let _searchSpinnersShown = false;
+
+    function _showSearchSpinners() {
+        if (_searchSpinnersShown) return;
+        _searchSpinnersShown = true;
+        const panel = document.getElementById('resultsPanel');
+        panel.innerHTML = '<div class="search-progress-bar">'
+            + '<div class="sp-item" id="sp-flights"><span class="spinner"></span> Searching flights...</div>'
+            + '<div class="sp-item" id="sp-hotels"><span class="spinner"></span> Searching hotels...</div>'
+            + '<div class="sp-item" id="sp-cars"><span class="spinner"></span> Searching cars...</div>'
+            + '</div>';
+    }
+
+    async function pollRun(runId) {
+        _partialRendered = { flights: false, hotels: false, cars: false };
+        _searchSpinnersShown = false;
+        const maxAttempts = 90;
+        for (let i = 0; i < maxAttempts; i++) {
+            await sleep(i < 2 ? 500 : 1000);
+            try {
+                const run = await API.get(`/api/runs/${runId}`);
+                const status = run && run.data ? run.data.status : null;
+                if (status && ['completed', 'success', 'failed', 'error'].includes(status)) {
+                    await reloadThread();
+                    return;
+                }
+                if (activeThread) {
+                    const prog = await API.get(`${BASE}/threads/${activeThread}/search-progress`);
+                    if (prog.success && prog.data) {
+                        if (prog.data.active && !prog.data.done) {
+                            _showSearchSpinners();
+                        }
+                        if (prog.data.active) {
+                            _renderPartialResults(prog.data);
+                        }
+                        if (prog.data.done) {
+                            await reloadThread();
+                            return;
+                        }
+                    }
+                }
+            } catch (_) {}
+        }
+        await reloadThread();
+    }
+
+    function _renderPartialResults(prog) {
+        if (!latestResults) latestResults = { flights: [], hotels: [], cars: [] };
+        const panel = document.getElementById('resultsPanel');
+
+        if (prog.flights && !_partialRendered.flights) {
+            _partialRendered.flights = true;
+            latestResults.flights = prog.flights;
+            const sp = document.getElementById('sp-flights');
+            if (sp) sp.innerHTML = `<span style="color:#a6e3a1;">✓</span> Found ${prog.flights.length} flights`;
+            _appendResultSection(panel, 'flights', prog.flights);
+        }
+        if (prog.hotels && !_partialRendered.hotels) {
+            _partialRendered.hotels = true;
+            latestResults.hotels = prog.hotels;
+            const sp = document.getElementById('sp-hotels');
+            if (sp) sp.innerHTML = `<span style="color:#a6e3a1;">✓</span> Found ${prog.hotels.length} hotels`;
+            _appendResultSection(panel, 'hotels', prog.hotels);
+        }
+        if (prog.cars && !_partialRendered.cars) {
+            _partialRendered.cars = true;
+            latestResults.cars = prog.cars;
+            const sp = document.getElementById('sp-cars');
+            if (sp) sp.innerHTML = `<span style="color:#a6e3a1;">✓</span> Found ${prog.cars.length} cars`;
+            _appendResultSection(panel, 'cars', prog.cars);
+        }
+
+        if (_partialRendered.flights && _partialRendered.hotels && _partialRendered.cars) {
+            const bar = panel.querySelector('.search-progress-bar');
+            if (bar) bar.remove();
+            if (!panel.querySelector('.btn-reserve')) {
+                panel.innerHTML += '<button class="btn-reserve" id="reserveBtn" onclick="confirmReservation()" disabled>Select at least one option to reserve</button>';
+            }
+        }
+    }
+
+    function _appendResultSection(panel, type, items) {
+        if (!items || !items.length) return;
+        const existing = panel.querySelector(`[data-section="${type}"]`);
+        if (existing) existing.remove();
+
+        const div = document.createElement('div');
+        div.className = 'results-section';
+        div.dataset.section = type;
+
+        if (type === 'flights') {
+            div.innerHTML = `<h3>✈ Flights</h3>` + items.map((f, i) =>
+                `<div class="result-card" id="flight-${i}" onclick="selectResult('flight', ${i})">
+                    <div class="title">${esc(f.airline || '')} ${esc(f.flight_number || '')}</div>
+                    <div class="detail">${esc(f.origin_city || f.origin || '')} → ${esc(f.destination_city || f.destination || '')} · ${esc(f.travel_class || 'economy')}</div>
+                    <div class="price">EUR ${(f.price_eur || 0).toFixed(0)}</div>
+                    <div class="score">Score: ${((f.score || 0) * 100).toFixed(1)}%</div>
+                    ${descCollapsible(f.text_description)}
+                </div>`).join('');
+        } else if (type === 'hotels') {
+            div.innerHTML = `<h3>🏨 Hotels</h3>` + items.map((h, i) =>
+                `<div class="result-card" id="hotel-${i}" onclick="selectResult('hotel', ${i})">
+                    <div class="title">${esc(h.name || '')} ${'★'.repeat(h.stars || 0)}</div>
+                    <div class="detail">${esc(h.city || '')} · ${(h.amenities || []).slice(0, 3).join(', ')}</div>
+                    <div class="price">EUR ${(h.price_per_night_eur || 0).toFixed(0)}/night</div>
+                    <div class="score">Score: ${((h.score || 0) * 100).toFixed(1)}%</div>
+                    ${descCollapsible(h.text_description)}
+                </div>`).join('');
+        } else if (type === 'cars') {
+            div.innerHTML = `<h3>🚗 Cars</h3>` + items.map((c, i) =>
+                `<div class="result-card" id="car-${i}" onclick="selectResult('car', ${i})">
+                    <div class="title">${esc(c.color || '')} ${esc(c.make || '')} ${esc(c.model || '')}</div>
+                    <div class="detail">${esc(c.category || '')} · ${esc(c.transmission || '')} · ${esc(c.fuel_type || '')}</div>
+                    <div class="price">EUR ${(c.price_per_day_eur || 0).toFixed(0)}/day</div>
+                    <div class="score">Score: ${((c.score || 0) * 100).toFixed(1)}%</div>
+                    ${descCollapsible(c.text_description)}
+                </div>`).join('');
+        }
+
+        const reserveBtn = panel.querySelector('.btn-reserve');
+        if (reserveBtn) panel.insertBefore(div, reserveBtn);
+        else panel.appendChild(div);
+    }
+
+    async function loadThreads() {
+        try {
+            const res = await API.get(`${BASE}/threads`);
+            threads = (res.success ? res.data : []) || [];
+            renderThreads();
+        } catch (_) { threads = []; renderThreads(); }
+    }
+
+    async function selectThread(threadId) {
+        activeThread = threadId;
+        renderThreads();
+        await reloadThread();
+    }
+
+    async function reloadThread() {
+        if (!activeThread) return;
+        try {
+            const res = await API.get(`${BASE}/threads/${activeThread}`);
+            if (res.success) renderChat(res.data);
+        } catch (_) {}
+    }
+
+    window.deleteThread = async function (id, ev) {
+        ev.stopPropagation();
+        try {
+            await API.del(`${BASE}/threads/${id}`);
+            if (activeThread === id) activeThread = null;
+            await loadThreads();
+            document.getElementById('chatMessages').innerHTML = '<div class="empty-state">Select or create a thread.</div>';
+            document.getElementById('resultsPanel').innerHTML = '<div class="empty-state">Send a message to search.</div>';
+        } catch (_) {}
+    };
+
+    function renderThreads() {
+        const bar = document.getElementById('threadsBar');
+        bar.innerHTML = '<button class="btn-new-thread" onclick="createThread()">+ New</button>';
+        threads.forEach(t => {
+            const chip = document.createElement('span');
+            chip.className = `thread-chip${t.id === activeThread ? ' active' : ''}`;
+            chip.innerHTML = `${esc(t.title)}<span class="del" onclick="deleteThread('${t.id}', event)">×</span>`;
+            chip.onclick = () => selectThread(t.id);
+            bar.appendChild(chip);
+        });
+    }
+
+    function renderChat(thread) {
+        const el = document.getElementById('chatMessages');
+        el.innerHTML = '';
+        (thread.messages || []).forEach(m => {
+            appendChat(m.role, m.content, false);
+            if (m.search_results) {
+                latestResults = m.search_results;
+                renderResults(m.search_results);
+            }
+            if (m.reservation) {
+                showReservationBanner(m.reservation);
+            }
+            if (m.cancellation) {
+                showCancellationBanner(m.cancellation);
+            }
+            if (m.modify_results) {
+                renderModifyResults(m.modify_results);
+            }
+            if (m.reservation_update) {
+                showUpdateBanner(m.reservation_update);
+            }
+        });
+        el.scrollTop = el.scrollHeight;
+    }
+
+    function appendChat(role, content, scroll = true) {
+        const el = document.getElementById('chatMessages');
+        const empty = el.querySelector('.empty-state');
+        if (empty) empty.remove();
+        const div = document.createElement('div');
+        div.className = `chat-msg ${role}`;
+        div.textContent = content;
+        el.appendChild(div);
+        if (scroll) el.scrollTop = el.scrollHeight;
+    }
+
+    function renderResults(results) {
+        const panel = document.getElementById('resultsPanel');
+        panel.innerHTML = '';
+        selected = { flight: null, hotel: null, car: null };
+
+        if (results.flights && results.flights.length) {
+            panel.innerHTML += `<div class="results-section"><h3>✈ Flights</h3>${results.flights.map((f, i) =>
+                `<div class="result-card" id="flight-${i}" onclick="selectResult('flight', ${i})">
+                    <div class="title">${esc(f.airline || '')} ${esc(f.flight_number || '')}</div>
+                    <div class="detail">${esc(f.origin_city || f.origin || '')} → ${esc(f.destination_city || f.destination || '')} · ${esc(f.travel_class || 'economy')}</div>
+                    <div class="price">EUR ${(f.price_eur || 0).toFixed(0)}</div>
+                    <div class="score">Score: ${((f.score || 0) * 100).toFixed(1)}%</div>
+                    ${descCollapsible(f.text_description)}
+                </div>`
+            ).join('')}</div>`;
+        }
+        if (results.hotels && results.hotels.length) {
+            panel.innerHTML += `<div class="results-section"><h3>🏨 Hotels</h3>${results.hotels.map((h, i) =>
+                `<div class="result-card" id="hotel-${i}" onclick="selectResult('hotel', ${i})">
+                    <div class="title">${esc(h.name || '')} ${'★'.repeat(h.stars || 0)}</div>
+                    <div class="detail">${esc(h.city || '')} · ${(h.amenities || []).slice(0, 3).join(', ')}</div>
+                    <div class="price">EUR ${(h.price_per_night_eur || 0).toFixed(0)}/night</div>
+                    <div class="score">Score: ${((h.score || 0) * 100).toFixed(1)}%</div>
+                    ${descCollapsible(h.text_description)}
+                </div>`
+            ).join('')}</div>`;
+        }
+        if (results.cars && results.cars.length) {
+            panel.innerHTML += `<div class="results-section"><h3>🚗 Cars</h3>${results.cars.map((c, i) =>
+                `<div class="result-card" id="car-${i}" onclick="selectResult('car', ${i})">
+                    <div class="title">${esc(c.color || '')} ${esc(c.make || '')} ${esc(c.model || '')}</div>
+                    <div class="detail">${esc(c.category || '')} · ${esc(c.transmission || '')} · ${esc(c.fuel_type || '')}</div>
+                    <div class="price">EUR ${(c.price_per_day_eur || 0).toFixed(0)}/day</div>
+                    <div class="score">Score: ${((c.score || 0) * 100).toFixed(1)}%</div>
+                    ${descCollapsible(c.text_description)}
+                </div>`
+            ).join('')}</div>`;
+        }
+
+        panel.innerHTML += '<button class="btn-reserve" id="reserveBtn" onclick="confirmReservation()" disabled>Select at least one option to reserve</button>';
+    }
+
+    function _updateReserveBtn() {
+        const btn = document.getElementById('reserveBtn');
+        if (!btn) return;
+        const count = (selected.flight ? 1 : 0) + (selected.hotel ? 1 : 0) + (selected.car ? 1 : 0);
+        if (count > 0) {
+            btn.disabled = false;
+            const parts = [];
+            if (selected.flight) parts.push('flight');
+            if (selected.hotel) parts.push('hotel');
+            if (selected.car) parts.push('car');
+            btn.textContent = `Confirm Reservation (${parts.join(' + ')})`;
+        } else {
+            btn.disabled = true;
+            btn.textContent = 'Select at least one option to reserve';
+        }
+    }
+
+    window.selectResult = function (type, idx) {
+        const items = latestResults[type + 's'];
+        if (!items || !items[idx]) return;
+
+        const card = document.getElementById(`${type}-${idx}`);
+        if (card && card.classList.contains('selected')) {
+            card.classList.remove('selected');
+            selected[type] = null;
+        } else {
+            document.querySelectorAll(`[id^="${type}-"]`).forEach(el => el.classList.remove('selected'));
+            card.classList.add('selected');
+            selected[type] = items[idx];
+        }
+
+        _updateReserveBtn();
+    };
+
+    window.confirmReservation = async function () {
+        if ((!selected.flight && !selected.hotel && !selected.car) || !activeThread) return;
+        const reserveBtn = document.getElementById('reserveBtn');
+        if (reserveBtn) { reserveBtn.disabled = true; reserveBtn.textContent = 'Confirming...'; }
+        document.getElementById('sendBtn').disabled = true;
+
+        try {
+            const payload = {
+                    trip_dates: { start: new Date().toISOString().slice(0, 10), end: new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 10) }
+                };
+            if (selected.flight) payload.selected_flight = selected.flight;
+            if (selected.hotel) payload.selected_hotel = selected.hotel;
+            if (selected.car) payload.selected_car = selected.car;
+            const res = await API.post(`${BASE}/threads/${activeThread}/messages`, {
+                message: `__RESERVE__${JSON.stringify(payload)}`
+            });
+            if (res.success && res.data && res.data.run_id) {
+                await pollReservation(res.data.run_id);
+            } else {
+                toast('Reservation failed: ' + ((res && res.error) || 'unknown'), 'error');
+            }
+        } catch (e) {
+            toast('Reservation failed', 'error');
+        }
+        document.getElementById('sendBtn').disabled = false;
+    };
+
+    async function pollReservation(runId) {
+        const maxAttempts = 60;
+        for (let i = 0; i < maxAttempts; i++) {
+            await sleep(1500);
+            try {
+                const run = await API.get(`/api/runs/${runId}`);
+                const status = run && run.data ? run.data.status : null;
+                if (status && ['completed', 'success', 'failed', 'error'].includes(status)) {
+                    await reloadThread();
+                    return;
+                }
+            } catch (_) {}
+        }
+        await reloadThread();
+    }
+
+    function showReservationBanner(res) {
+        const panel = document.getElementById('resultsPanel');
+        const existing = panel.querySelector('.reservation-banner');
+        if (!existing) {
+            const div = document.createElement('div');
+            div.className = 'reservation-banner';
+            div.textContent = `Reservation confirmed! Total: EUR ${(res.total_cost_eur || 0).toFixed(2)} — Traveler: ${res.traveler_name || 'John Doe'}`;
+            panel.prepend(div);
+        }
+    }
+
+    function showCancellationBanner(cancel) {
+        const panel = document.getElementById('resultsPanel');
+        const existing = panel.querySelector('.cancellation-banner');
+        if (!existing) {
+            const div = document.createElement('div');
+            div.className = 'cancellation-banner';
+            div.textContent = cancel.success
+                ? `Reservation ${cancel.reservation_id} has been cancelled.`
+                : `Could not cancel reservation ${cancel.reservation_id}.`;
+            panel.prepend(div);
+        }
+    }
+
+    let _modifyContext = null;
+    let _modifySelected = null;
+
+    function renderModifyResults(mr) {
+        const panel = document.getElementById('resultsPanel');
+        panel.innerHTML = '';
+        _modifyContext = { reservation_id: mr.reservation_id, category: mr.category };
+        _modifySelected = null;
+
+        const header = document.createElement('div');
+        header.className = 'modify-header';
+        header.innerHTML = `Modifying <strong>${esc(mr.category)}</strong> for reservation <strong>${esc(mr.reservation_id)}</strong> — select a replacement:`;
+        panel.appendChild(header);
+
+        const items = mr.results || [];
+        const cat = mr.category;
+
+        if (cat === 'flight') {
+            items.forEach((f, i) => {
+                const card = document.createElement('div');
+                card.className = 'result-card';
+                card.id = `modify-${i}`;
+                card.onclick = () => _selectModifyItem(i, f);
+                card.innerHTML = `<div class="title">${esc(f.airline || '')} ${esc(f.flight_number || '')}</div>`
+                    + `<div class="detail">${esc(f.origin_city || '')} → ${esc(f.destination_city || '')} · ${esc(f.travel_class || '')}</div>`
+                    + `<div class="price">EUR ${(f.price_eur || 0).toFixed(0)}</div>`
+                    + `<div class="score">Score: ${((f.score || 0) * 100).toFixed(1)}%</div>`
+                    + descCollapsible(f.text_description);
+                panel.appendChild(card);
+            });
+        } else if (cat === 'hotel') {
+            items.forEach((h, i) => {
+                const card = document.createElement('div');
+                card.className = 'result-card';
+                card.id = `modify-${i}`;
+                card.onclick = () => _selectModifyItem(i, h);
+                card.innerHTML = `<div class="title">${esc(h.name || '')} ${'★'.repeat(h.stars || 0)}</div>`
+                    + `<div class="detail">${esc(h.city || '')} · ${(h.amenities || []).slice(0, 3).join(', ')}</div>`
+                    + `<div class="price">EUR ${(h.price_per_night_eur || 0).toFixed(0)}/night</div>`
+                    + `<div class="score">Score: ${((h.score || 0) * 100).toFixed(1)}%</div>`
+                    + descCollapsible(h.text_description);
+                panel.appendChild(card);
+            });
+        } else if (cat === 'car') {
+            items.forEach((c, i) => {
+                const card = document.createElement('div');
+                card.className = 'result-card';
+                card.id = `modify-${i}`;
+                card.onclick = () => _selectModifyItem(i, c);
+                card.innerHTML = `<div class="title">${esc(c.color || '')} ${esc(c.make || '')} ${esc(c.model || '')}</div>`
+                    + `<div class="detail">${esc(c.category || '')} · ${esc(c.transmission || '')} · ${esc(c.fuel_type || '')}</div>`
+                    + `<div class="price">EUR ${(c.price_per_day_eur || 0).toFixed(0)}/day</div>`
+                    + `<div class="score">Score: ${((c.score || 0) * 100).toFixed(1)}%</div>`
+                    + descCollapsible(c.text_description);
+                panel.appendChild(card);
+            });
+        }
+
+        if (!items.length) {
+            const empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.textContent = 'No alternatives found. Try a different request.';
+            panel.appendChild(empty);
+        } else {
+            const btn = document.createElement('button');
+            btn.className = 'btn-update';
+            btn.id = 'updateBtn';
+            btn.disabled = true;
+            btn.textContent = 'Select an option to update reservation';
+            btn.onclick = function () { window.confirmUpdate(); };
+            panel.appendChild(btn);
+        }
+    }
+
+    function _selectModifyItem(idx, item) {
+        _modifySelected = item;
+        document.querySelectorAll('[id^="modify-"]').forEach(el => el.classList.remove('selected'));
+        document.getElementById(`modify-${idx}`).classList.add('selected');
+        const btn = document.getElementById('updateBtn');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = `Update Reservation (${_modifyContext.category})`;
+        }
+    }
+
+    window.confirmUpdate = async function () {
+        if (!_modifyContext || !_modifySelected || !activeThread) return;
+        const btn = document.getElementById('updateBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
+        document.getElementById('sendBtn').disabled = true;
+
+        try {
+            const res = await API.post(`${BASE}/threads/${activeThread}/messages`, {
+                message: `__UPDATE__${JSON.stringify({
+                    reservation_id: _modifyContext.reservation_id,
+                    category: _modifyContext.category,
+                    selected_item: _modifySelected,
+                })}`
+            });
+            if (res.success && res.data && res.data.run_id) {
+                await pollReservation(res.data.run_id);
+            } else {
+                toast('Update failed: ' + ((res && res.error) || 'unknown'), 'error');
+            }
+        } catch (e) {
+            toast('Update failed', 'error');
+        }
+        _modifyContext = null;
+        _modifySelected = null;
+        document.getElementById('sendBtn').disabled = false;
+    };
+
+    function showUpdateBanner(upd) {
+        const panel = document.getElementById('resultsPanel');
+        const existing = panel.querySelector('.update-banner');
+        if (!existing) {
+            const div = document.createElement('div');
+            div.className = 'update-banner';
+            div.textContent = upd.success
+                ? `Reservation ${upd.reservation_id} — ${upd.category} updated successfully!`
+                : `Failed to update ${upd.category} in reservation ${upd.reservation_id}.`;
+            panel.prepend(div);
+        }
+    }
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    function descCollapsible(text) {
+        if (!text) return '';
+        const uid = 'desc-' + Math.random().toString(36).slice(2, 9);
+        return `<span class="desc-toggle" onclick="event.stopPropagation(); var b=document.getElementById('${uid}'); var open=b.classList.toggle('open'); this.textContent=open?'▾ Hide details':'▸ Show details';">▸ Show details</span>`
+             + `<div class="desc-body" id="${uid}">${esc(text)}</div>`;
+    }
+
+    async function loadSuggestions() {
+        const container = document.getElementById('suggestionsContainer');
+        const btn = document.getElementById('suggestRefreshBtn');
+        btn.disabled = true;
+        container.innerHTML = '<div style="font-size:11px;color:#6c7086;padding:4px 0;">Loading...</div>';
+        try {
+            const res = await API.get(`${BASE}/suggestions`);
+            const items = (res.success && res.data && res.data.suggestions) ? res.data.suggestions : [];
+            if (!items.length) {
+                container.innerHTML = '<div style="font-size:11px;color:#6c7086;">No suggestions available.</div>';
+                btn.disabled = false;
+                return;
+            }
+            container.innerHTML = '';
+            items.forEach(text => {
+                const card = document.createElement('div');
+                card.className = 'suggestion-card';
+                card.textContent = text;
+                card.onclick = () => {
+                    document.getElementById('chatInput').value = text;
+                    document.getElementById('chatInput').focus();
+                };
+                container.appendChild(card);
+            });
+        } catch (_) {
+            container.innerHTML = '<div style="font-size:11px;color:#6c7086;">Failed to load suggestions.</div>';
+        }
+        btn.disabled = false;
+    }
+
+    window._tpRefreshSuggestions = function () { loadSuggestions(); };
+
+    /* Long-term memory UI */
+    let _memoryOpen = false;
+    window._tpToggleMemory = function () {
+        _memoryOpen = !_memoryOpen;
+        document.getElementById('memoryItems').classList.toggle('open', _memoryOpen);
+        document.getElementById('memoryToggle').textContent = _memoryOpen ? '▾' : '▸';
+        if (_memoryOpen) loadMemory();
+    };
+
+    async function loadMemory() {
+        const container = document.getElementById('memoryItems');
+        container.innerHTML = '<div style="font-size:11px;color:#6c7086;padding:4px 0;">Loading...</div>';
+        try {
+            const res = await API.get(`${BASE}/memory`);
+            const prefs = (res.success && res.data && res.data.preferences) ? res.data.preferences : [];
+            if (!prefs.length) {
+                container.innerHTML = '<div class="memory-empty">No preferences learned yet. Chat a bit and I\'ll start remembering your travel style!</div>';
+                return;
+            }
+            container.innerHTML = '';
+            prefs.forEach(p => {
+                const item = document.createElement('div');
+                item.className = 'memory-item';
+                item.innerHTML = `<span class="cat">${esc(p.category || 'general')}</span> ${esc(p.fact || '')}`;
+                container.appendChild(item);
+            });
+            const clearBtn = document.createElement('button');
+            clearBtn.className = 'memory-clear-btn';
+            clearBtn.textContent = 'Clear all memories';
+            clearBtn.onclick = async function () {
+                if (!confirm('Clear all stored preferences? This cannot be undone.')) return;
+                await API.del(`${BASE}/memory`);
+                container.innerHTML = '<div class="memory-empty">Memory cleared.</div>';
+            };
+            container.appendChild(clearBtn);
+        } catch (_) {
+            container.innerHTML = '<div class="memory-empty">Failed to load memories.</div>';
+        }
+    }
+
+    async function loadLlmBadge() {
+        try {
+            const res = await API.get(`/api/agents/${typeof AGENT_ID !== 'undefined' ? AGENT_ID : ''}/settings`);
+            if (res.success && res.data) {
+                const badge = document.getElementById('llmBadge');
+                if (badge) badge.textContent = res.data.llm_model || res.data.llm_provider || '';
+            }
+        } catch (_) {}
+    }
+
+    loadThreads();
+    loadSuggestions();
+    loadLlmBadge();
+})();
+</script>

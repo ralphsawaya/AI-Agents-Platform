@@ -105,6 +105,16 @@ INTEGRATION_REGISTRY: dict[str, dict[str, str]] = {
         "description": "Secret for TradingView webhook authentication",
         "category": "Trading",
     },
+    "VOYAGE_AI_API_KEY": {
+        "label": "Voyage AI API Key",
+        "description": "API key for Voyage AI embedding model",
+        "category": "AI & Embeddings",
+    },
+    "ATLAS_MONGODB_URI": {
+        "label": "Atlas MongoDB URI",
+        "description": "Connection string for MongoDB Atlas (trip collections)",
+        "category": "Database",
+    },
 }
 
 _SKIP_KEYS = {

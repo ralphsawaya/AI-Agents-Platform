@@ -1,0 +1,186 @@
+<!--
+  Trip Reservations — Custom Tab
+  Displays confirmed trip reservations with full details and delete capability.
+-->
+<style>
+    .tr-wrapper { font-family: system-ui, -apple-system, sans-serif; height: calc(100vh - 140px); display: flex; flex-direction: column; }
+    .tr-header { padding: 16px 20px; background: #27273a; border-radius: 12px 12px 0 0; font-weight: 600; font-size: 15px; color: #cdd6f4; border-bottom: 1px solid #313244; display: flex; align-items: center; justify-content: space-between; }
+    .tr-header .icon { font-size: 18px; margin-right: 10px; }
+    .tr-header .count { font-size: 12px; color: #9399b2; font-weight: 400; }
+    .tr-body { flex: 1; overflow-y: auto; background: #1e1e2e; border-radius: 0 0 12px 12px; padding: 20px; }
+
+    .tr-empty { color: #6c7086; text-align: center; padding: 80px 20px; font-size: 14px; }
+
+    .tr-card { background: #27273a; border-radius: 12px; border: 1px solid #313244; margin-bottom: 16px; overflow: hidden; transition: border-color 0.15s; }
+    .tr-card:hover { border-color: #45475a; }
+
+    .tr-card-header { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: #313244; }
+    .tr-card-header .tr-total { font-size: 18px; font-weight: 700; color: #a6e3a1; }
+    .tr-card-header .tr-status { font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 3px 10px; border-radius: 12px; background: #a6e3a1; color: #1e1e2e; }
+    .tr-card-header .tr-date { font-size: 12px; color: #9399b2; }
+
+    .tr-sections { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0; }
+    .tr-section { padding: 16px 20px; border-right: 1px solid #313244; }
+    .tr-section:last-child { border-right: none; }
+    .tr-section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #89b4fa; margin-bottom: 10px; letter-spacing: 0.5px; }
+    .tr-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: #bac2de; padding: 3px 0; }
+    .tr-row .label { color: #6c7086; }
+    .tr-row .value { color: #cdd6f4; font-weight: 500; }
+    .tr-row .price { color: #a6e3a1; font-weight: 700; }
+
+    .tr-card-footer { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; border-top: 1px solid #313244; }
+    .tr-card-footer .tr-trip-dates { font-size: 12px; color: #9399b2; }
+    .tr-btn-delete { padding: 6px 16px; border-radius: 6px; border: 1px solid #f38ba8; background: transparent; color: #f38ba8; font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .tr-btn-delete:hover { background: #f38ba8; color: #1e1e2e; }
+    .tr-btn-delete:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .tr-btn-refresh { padding: 6px 14px; border-radius: 6px; border: none; background: #313244; color: #cdd6f4; font-size: 12px; cursor: pointer; transition: background 0.15s; }
+    .tr-btn-refresh:hover { background: #45475a; }
+
+    .tr-toast { position: fixed; bottom: 24px; right: 24px; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 9999; animation: trFadeIn 0.2s; }
+    .tr-toast.success { background: #a6e3a1; color: #1e1e2e; }
+    .tr-toast.error { background: #f38ba8; color: #1e1e2e; }
+    @keyframes trFadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+    @media (max-width: 900px) {
+        .tr-sections { grid-template-columns: 1fr; }
+        .tr-section { border-right: none; border-bottom: 1px solid #313244; }
+        .tr-section:last-child { border-bottom: none; }
+    }
+</style>
+
+<div class="tr-wrapper">
+    <div class="tr-header">
+        <div><span class="icon">📋</span> Trip Reservations <span class="count" id="trCount"></span></div>
+        <button class="tr-btn-refresh" onclick="_trRefresh()">↻ Refresh</button>
+    </div>
+    <div class="tr-body" id="trBody">
+        <div class="tr-empty">Loading reservations...</div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const BASE = `/api/trip/${typeof AGENT_ID !== 'undefined' ? AGENT_ID : ''}`;
+
+    function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+    function trToast(msg, type) {
+        const t = document.createElement('div');
+        t.className = `tr-toast ${type || 'success'}`;
+        t.textContent = msg;
+        document.body.appendChild(t);
+        setTimeout(() => t.remove(), 3000);
+    }
+
+    function formatDate(d) {
+        if (!d) return '—';
+        try {
+            const dt = new Date(d);
+            return dt.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        } catch (_) { return String(d); }
+    }
+
+    async function loadReservations() {
+        const body = document.getElementById('trBody');
+        const count = document.getElementById('trCount');
+        try {
+            const res = await API.get(`${BASE}/reservations`);
+            if (!res.success) {
+                body.innerHTML = `<div class="tr-empty">Failed to load: ${esc(res.error || 'unknown error')}</div>`;
+                count.textContent = '';
+                return;
+            }
+            const items = res.data || [];
+            count.textContent = `(${items.length})`;
+            if (items.length === 0) {
+                body.innerHTML = '<div class="tr-empty">No reservations yet. Use the Trip Planner to search and book a trip.</div>';
+                return;
+            }
+            body.innerHTML = items.map(r => renderCard(r)).join('');
+        } catch (e) {
+            body.innerHTML = '<div class="tr-empty">Failed to load reservations.</div>';
+            count.textContent = '';
+        }
+    }
+
+    function renderCard(r) {
+        const f = r.flight || {};
+        const h = r.hotel || {};
+        const c = r.car || {};
+        const dates = r.trip_dates || {};
+        const created = formatDate(r.created_at);
+
+        return `
+        <div class="tr-card" id="tr-${esc(r.id)}">
+            <div class="tr-card-header">
+                <div>
+                    <span style="font-size:12px;font-weight:600;color:#89b4fa;margin-right:12px;font-family:monospace;">${esc(r.id)}</span>
+                    <span class="tr-total">EUR ${(r.total_cost_eur || 0).toFixed(2)}</span>
+                    <span class="tr-date" style="margin-left:12px;">Booked ${esc(created)}</span>
+                </div>
+                <span class="tr-status">${esc(r.status || 'confirmed')}</span>
+            </div>
+            <div class="tr-sections">
+                <div class="tr-section">
+                    <div class="tr-section-title">✈ Flight</div>
+                    <div class="tr-row"><span class="label">Airline</span><span class="value">${esc(f.airline)} ${esc(f.flight_number)}</span></div>
+                    <div class="tr-row"><span class="label">Route</span><span class="value">${esc(f.origin_city || f.origin)} → ${esc(f.destination_city || f.destination)}</span></div>
+                    <div class="tr-row"><span class="label">Date</span><span class="value">${esc(f.date)}</span></div>
+                    <div class="tr-row"><span class="label">Class</span><span class="value">${esc(f.travel_class)}</span></div>
+                    <div class="tr-row"><span class="label">Departs</span><span class="value">${esc(f.departure_time)}</span></div>
+                    <div class="tr-row"><span class="label">Stops</span><span class="value">${f.stops != null ? f.stops : '—'}</span></div>
+                    <div class="tr-row"><span class="label">Price</span><span class="price">EUR ${(f.price_eur || 0).toFixed(0)}</span></div>
+                </div>
+                <div class="tr-section">
+                    <div class="tr-section-title">🏨 Hotel</div>
+                    <div class="tr-row"><span class="label">Name</span><span class="value">${esc(h.name)}</span></div>
+                    <div class="tr-row"><span class="label">Location</span><span class="value">${esc(h.city)}, ${esc(h.country)}</span></div>
+                    <div class="tr-row"><span class="label">Stars</span><span class="value">${'★'.repeat(h.stars || 0)}</span></div>
+                    <div class="tr-row"><span class="label">Area</span><span class="value">${esc(h.neighborhood)}</span></div>
+                    <div class="tr-row"><span class="label">Rating</span><span class="value">${h.rating || '—'}/5</span></div>
+                    <div class="tr-row"><span class="label">Amenities</span><span class="value">${(h.amenities || []).slice(0, 4).join(', ')}</span></div>
+                    <div class="tr-row"><span class="label">Price</span><span class="price">EUR ${(h.price_per_night_eur || 0).toFixed(0)}/night</span></div>
+                </div>
+                <div class="tr-section">
+                    <div class="tr-section-title">🚗 Car Rental</div>
+                    <div class="tr-row"><span class="label">Vehicle</span><span class="value">${esc(c.color)} ${esc(c.make)} ${esc(c.model)}</span></div>
+                    <div class="tr-row"><span class="label">Category</span><span class="value">${esc(c.category)}</span></div>
+                    <div class="tr-row"><span class="label">Doors</span><span class="value">${c.doors || '—'}</span></div>
+                    <div class="tr-row"><span class="label">Transmission</span><span class="value">${esc(c.transmission)}</span></div>
+                    <div class="tr-row"><span class="label">Fuel</span><span class="value">${esc(c.fuel_type)}</span></div>
+                    <div class="tr-row"><span class="label">Company</span><span class="value">${esc(c.company)}</span></div>
+                    <div class="tr-row"><span class="label">Price</span><span class="price">EUR ${(c.price_per_day_eur || 0).toFixed(0)}/day</span></div>
+                </div>
+            </div>
+            <div class="tr-card-footer">
+                <div class="tr-trip-dates">📅 ${esc(dates.start || '—')} → ${esc(dates.end || '—')} · Traveler: ${esc(r.traveler_name || '—')}</div>
+                <button class="tr-btn-delete" onclick="_trDelete('${esc(r.id)}')">Delete</button>
+            </div>
+        </div>`;
+    }
+
+    window._trDelete = async function (id) {
+        if (!confirm('Delete this reservation? This cannot be undone.')) return;
+        const btn = document.querySelector(`#tr-${id} .tr-btn-delete`);
+        if (btn) { btn.disabled = true; btn.textContent = 'Deleting...'; }
+        try {
+            const res = await API.del(`${BASE}/reservations/${id}`);
+            if (res.success) {
+                trToast('Reservation deleted');
+                await loadReservations();
+            } else {
+                trToast(res.error || 'Failed to delete', 'error');
+                if (btn) { btn.disabled = false; btn.textContent = 'Delete'; }
+            }
+        } catch (e) {
+            trToast('Failed to delete reservation', 'error');
+            if (btn) { btn.disabled = false; btn.textContent = 'Delete'; }
+        }
+    };
+
+    window._trRefresh = function () { loadReservations(); };
+
+    loadReservations();
+})();
+</script>

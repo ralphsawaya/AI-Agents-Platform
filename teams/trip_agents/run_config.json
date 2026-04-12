@@ -1,0 +1,12 @@
+{
+    "schema": [
+        {
+            "key": "prompt",
+            "type": "textarea",
+            "label": "Trip Search Query",
+            "placeholder": "e.g. I want to fly from Paris to Milan next week, stay in a 4-star hotel with a pool, and rent an automatic BMW",
+            "required": true,
+            "lines": 3
+        }
+    ]
+}

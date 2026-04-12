@@ -1,0 +1,6 @@
+name: agent_hotel
+role: hotel_search
+description: Searches for hotels using MongoDB Atlas vector search with Voyage AI embeddings
+model: voyage-3-lite
+temperature: 0.0
+max_tokens: 2048
