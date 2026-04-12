@@ -1,0 +1,12 @@
+The user asked: "{{query}}"
+
+Search results found:
+{{results_brief}}
+{{prefs_section}}
+
+Write a brief, friendly 1-3 sentence summary of what was found.
+Be conversational and natural — not robotic. Mention key highlights.
+If some categories had no results, mention that naturally.
+Do NOT list every result — just give a warm overview.
+Do NOT use bullet points or numbered lists.
+Return ONLY the summary text, no JSON.

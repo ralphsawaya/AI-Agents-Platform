@@ -23,37 +23,12 @@ from datetime import datetime, timezone
 
 from shared.atlas import get_long_memory
 from shared.llm import get_llm
+from shared.prompt_loader import load_prompt_raw
 from shared.logger import get_logger
 
 logger = get_logger("shared.memory")
 
 MAX_PREFERENCES = 30
-
-_EXTRACT_SYSTEM = """\
-You are a preference-extraction engine for a travel booking assistant.
-Given a conversation between a user and the assistant, identify any
-long-term user preferences, habits, or personal facts that would be
-useful to remember for **future** trips.
-
-Examples of useful facts:
-- Preferred airlines, hotel chains, car brands
-- Star-rating preferences ("always wants 4+ star hotels")
-- Budget constraints ("tries to stay under EUR 200/night")
-- Travel style ("prefers direct flights", "likes manual transmission cars")
-- Dietary / accessibility needs
-- Home city or frequent destinations
-- Disliked things ("hates layovers", "avoids diesel")
-- Group size ("usually travels with partner and 2 kids")
-
-Rules:
-- Only extract **new** preferences not already in the existing memory.
-- Each fact must be a concise, standalone sentence.
-- Assign a category: "flight", "hotel", "car", or "general".
-- If there are NO new preferences to extract, return an empty array.
-- Return valid JSON only — an array of objects with keys "fact" and "category".
-
-Respond with ONLY a JSON array. No markdown fences, no explanation.
-"""
 
 
 def extract_preferences(messages: list, existing_prefs: list | None = None) -> list[dict]:
@@ -75,7 +50,7 @@ def extract_preferences(messages: list, existing_prefs: list | None = None) -> l
                 "\n".join(f"- {p.get('fact', '')}" for p in existing_prefs)
 
         prompt = f"Conversation:\n{convo}{existing_text}"
-        raw = llm.invoke(prompt, system=_EXTRACT_SYSTEM)
+        raw = llm.invoke(prompt, system=load_prompt_raw("memory_extraction"))
 
         match = re.search(r"\[.*\]", raw, re.DOTALL)
         if not match:

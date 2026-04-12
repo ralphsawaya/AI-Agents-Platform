@@ -210,12 +210,20 @@ def _save_cancel_message(thread_id: str, reservation_id: str, success: bool, det
 
 
 def run_modify(args: dict):
-    """Search for replacement options for one category in an existing reservation."""
+    """Search for replacement options for one category in an existing reservation.
+
+    Uses the same sub-agent graphs as the main search pipeline instead of
+    duplicating vector-search logic.
+    """
     from datetime import datetime, timezone
-    from shared.atlas import get_reservations, get_chat_persistence
+    from shared.atlas import get_reservations
     from shared.llm import get_llm
+    from shared.prompt_loader import load_prompt
     from shared.query_parser import _clean_flight_filters, _clean_hotel_filters, _clean_car_filters
     from shared.mongo import get_collection
+    from agent_flight.agent import build_flight_graph
+    from agent_hotel.agent import build_hotel_graph
+    from agent_car.agent import build_car_graph
     import re as _re
 
     reservation_id = args.get("reservation_id", "")
@@ -241,19 +249,13 @@ def run_modify(args: dict):
 
     try:
         llm = get_llm()
-        prompt = (
-            f'The user wants to modify reservation {reservation_id}.\n'
-            f'User message: "{message}"\n\n'
-            f'Current reservation:\n'
-            f'- Flight: {json.dumps(reservation.get("flight", {}), default=str)[:200]}\n'
-            f'- Hotel: {json.dumps(reservation.get("hotel", {}), default=str)[:200]}\n'
-            f'- Car: {json.dumps(reservation.get("car", {}), default=str)[:200]}\n\n'
-            'Determine which ONE category the user wants to change: "flight", "hotel", or "car".\n'
-            'Also extract any search filters for the replacement.\n'
-            'Return JSON: {"category": "flight"|"hotel"|"car", "filters": {...}}\n'
-            'Filter fields - flight: origin_city, destination_city, travel_class\n'
-            'hotel: city, stars  |  car: color, make, category, transmission, fuel_type, pickup_city\n'
-            'Only include filters explicitly mentioned. Return ONLY valid JSON.'
+        prompt = load_prompt(
+            "modify_parser",
+            reservation_id=reservation_id,
+            message=message,
+            flight_summary=json.dumps(reservation.get("flight", {}), default=str)[:200],
+            hotel_summary=json.dumps(reservation.get("hotel", {}), default=str)[:200],
+            car_summary=json.dumps(reservation.get("car", {}), default=str)[:200],
         )
         raw = llm.invoke(prompt)
         match = _re.search(r'\{.*\}', raw, _re.DOTALL)
@@ -270,6 +272,7 @@ def run_modify(args: dict):
         output = {"status": "error", "error": "Could not determine category"}
         print(f"\n__RESULT_JSON__:{json.dumps(output)}")
         return None
+
     if category == "flight":
         filters = _clean_flight_filters(raw_filters)
         if not filters.get("origin_city") and reservation.get("flight", {}).get("origin_city"):
@@ -298,16 +301,34 @@ def run_modify(args: dict):
         except Exception:
             pass
 
-    from shared.voyage import embed_query
-    from shared.atlas import vector_search
-    collection_map = {"flight": "trip_flights", "hotel": "trip_hotels", "car": "trip_cars"}
-    from shared.atlas import get_atlas_collection
+    graph_builders = {
+        "flight": build_flight_graph,
+        "hotel": build_hotel_graph,
+        "car": build_car_graph,
+    }
 
     try:
-        col = get_atlas_collection(collection_map[category])
-        embedding = embed_query(message)
-        results = vector_search(col, embedding, limit=3, filters=filters)
-        logger.info("Modify search found %d %s results", len(results), category)
+        graph = graph_builders[category]()
+        result = graph.invoke({
+            "query": message, "query_embedding": [],
+            "filters": filters,
+            "results": [], "status": "pending",
+        })
+        results = result.get("results", [])
+        logger.info("Modify search found %d %s results (filters: %s)", len(results), category, filters)
+
+        if not results and filters:
+            logger.info("No results with strict filters, retrying with relaxed filters")
+            relaxed = {k: v for k, v in filters.items()
+                       if k not in ("pickup_city", "origin_city", "destination_city", "city")}
+            if relaxed != filters:
+                result = graph.invoke({
+                    "query": message, "query_embedding": [],
+                    "filters": relaxed,
+                    "results": [], "status": "pending",
+                })
+                results = result.get("results", [])
+                logger.info("Relaxed search found %d %s results", len(results), category)
     except Exception as exc:
         logger.error("Modify search failed: %s", exc)
         results = []
@@ -323,17 +344,17 @@ def run_modify(args: dict):
             pass
 
     current_item = reservation.get(category, {})
-    current_desc = ""
-    if category == "flight":
-        current_desc = f"{current_item.get('airline','')} {current_item.get('flight_number','')}"
-    elif category == "hotel":
-        current_desc = f"{current_item.get('name','')} ({current_item.get('stars',0)}★)"
-    else:
-        current_desc = f"{current_item.get('color','')} {current_item.get('make','')} {current_item.get('model','')}"
+    current_desc = _item_desc(category, current_item)
 
-    summary = (f"Here are some alternative {category} options to replace "
-               f"**{current_desc}** in reservation {reservation_id}. "
-               f"Select one and click 'Update Reservation' to apply the change.")
+    if results:
+        summary = (f"Here are some alternative {category} options to replace "
+                   f"**{current_desc}** in reservation {reservation_id}. "
+                   f"Select one and click 'Update Reservation' to apply the change.")
+    else:
+        summary = (f"I searched for alternative {category} options to replace "
+                   f"**{current_desc}** in reservation {reservation_id}, "
+                   f"but couldn't find any matches. Try describing what you're looking for "
+                   f"differently, or with fewer constraints.")
     _save_chat_msg(thread_id, summary, modify_results={
         "reservation_id": reservation_id,
         "category": category,

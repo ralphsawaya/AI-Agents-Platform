@@ -1,0 +1,14 @@
+The user wants to modify reservation {{reservation_id}}.
+User message: "{{message}}"
+
+Current reservation:
+- Flight: {{flight_summary}}
+- Hotel: {{hotel_summary}}
+- Car: {{car_summary}}
+
+Determine which ONE category the user wants to change: "flight", "hotel", or "car".
+Also extract any search filters for the replacement.
+Return JSON: {"category": "flight"|"hotel"|"car", "filters": {...}}
+Filter fields - flight: origin_city, destination_city, travel_class
+hotel: city, stars  |  car: color, make, category, transmission, fuel_type, pickup_city
+Only include filters explicitly mentioned. Return ONLY valid JSON.

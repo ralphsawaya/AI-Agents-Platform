@@ -1,11 +1,5 @@
-"""TypedDict state schema for the Flight Search agent."""
+"""Flight Search agent state — re-exports shared SearchAgentState."""
 
-from typing import TypedDict
+from shared.state import SearchAgentState as FlightSearchState
 
-
-class FlightSearchState(TypedDict):
-    query: str
-    query_embedding: list
-    filters: dict
-    results: list
-    status: str
+__all__ = ["FlightSearchState"]

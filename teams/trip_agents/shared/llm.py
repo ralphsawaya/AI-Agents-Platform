@@ -3,12 +3,32 @@
 Supports Google Gemini, Anthropic Claude, DeepSeek, Groq, and OpenAI.
 The active provider/model is read from MongoDB (team_settings collection)
 and falls back to environment variables.
+
+Includes retry logic (tenacity) and singleton client caching per provider+model.
 """
 
 from __future__ import annotations
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
 from shared.config import LLM_TEMPERATURE, MAX_TOKENS
 from shared.mongo import load_llm_config
+from shared.logger import get_logger
+
+logger = get_logger("shared.llm")
+
+LLM_TIMEOUT = 30
+
+
+def _llm_retry():
+    return retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type(Exception),
+        before_sleep=lambda rs: logger.warning(
+            "LLM call failed (attempt %d), retrying: %s", rs.attempt_number, rs.outcome.exception()
+        ),
+    )
 
 
 class _GeminiLLM:
@@ -18,6 +38,7 @@ class _GeminiLLM:
         self._client = genai.Client(api_key=api_key)
         self.model = model
 
+    @_llm_retry()
     def invoke(self, prompt: str, system: str = "") -> str:
         config = self._types.GenerateContentConfig(
             temperature=LLM_TEMPERATURE, max_output_tokens=MAX_TOKENS,
@@ -33,9 +54,10 @@ class _GeminiLLM:
 class _ClaudeLLM:
     def __init__(self, model: str, api_key: str):
         import anthropic
-        self._client = anthropic.Anthropic(api_key=api_key)
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=LLM_TIMEOUT)
         self.model = model
 
+    @_llm_retry()
     def invoke(self, prompt: str, system: str = "") -> str:
         kwargs: dict = {
             "model": self.model, "max_tokens": MAX_TOKENS,
@@ -50,9 +72,10 @@ class _ClaudeLLM:
 class _DeepSeekLLM:
     def __init__(self, model: str, api_key: str):
         from openai import OpenAI
-        self._client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        self._client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com", timeout=LLM_TIMEOUT)
         self.model = model
 
+    @_llm_retry()
     def invoke(self, prompt: str, system: str = "") -> str:
         messages = []
         if system:
@@ -67,9 +90,10 @@ class _DeepSeekLLM:
 class _GroqLLM:
     def __init__(self, model: str, api_key: str):
         from groq import Groq
-        self._client = Groq(api_key=api_key)
+        self._client = Groq(api_key=api_key, timeout=LLM_TIMEOUT)
         self.model = model
 
+    @_llm_retry()
     def invoke(self, prompt: str, system: str = "") -> str:
         messages = []
         if system:
@@ -84,9 +108,10 @@ class _GroqLLM:
 class _OpenAILLM:
     def __init__(self, model: str, api_key: str):
         from openai import OpenAI
-        self._client = OpenAI(api_key=api_key)
+        self._client = OpenAI(api_key=api_key, timeout=LLM_TIMEOUT)
         self.model = model
 
+    @_llm_retry()
     def invoke(self, prompt: str, system: str = "") -> str:
         messages = []
         if system:
@@ -103,11 +128,19 @@ _PROVIDER_MAP = {
     "groq": _GroqLLM, "openai": _OpenAILLM,
 }
 
+_llm_cache: dict[tuple[str, str], object] = {}
+
 
 def get_llm():
-    """Return an LLM instance based on team_settings (MongoDB -> env fallback)."""
+    """Return a cached LLM instance based on team_settings (MongoDB -> env fallback)."""
     provider, model, api_key = load_llm_config()
+    cache_key = (provider, model)
+    if cache_key in _llm_cache:
+        return _llm_cache[cache_key]
     cls = _PROVIDER_MAP.get(provider)
     if cls is None:
         raise ValueError(f"Unknown LLM provider: {provider}")
-    return cls(model, api_key)
+    instance = cls(model, api_key)
+    _llm_cache[cache_key] = instance
+    logger.info("Created and cached LLM client: %s/%s", provider, model)
+    return instance

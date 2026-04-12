@@ -1,38 +1,28 @@
-"""Shared orchestrator state that flows between trip agents."""
+"""Orchestrator state schemas for the trip agent team."""
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 
 class TripSearchState(TypedDict):
     query: str
     thread_id: str
-    chat_history: list
+    chat_history: list[dict[str, str]]
     is_search: bool
     nonsearch_reply: str
-    flight_filters: dict
-    hotel_filters: dict
-    car_filters: dict
-    flight_results: list
-    hotel_results: list
-    car_results: list
+    flight_filters: dict[str, Any]
+    hotel_filters: dict[str, Any]
+    car_filters: dict[str, Any]
+    flight_results: list[dict[str, Any]]
+    hotel_results: list[dict[str, Any]]
+    car_results: list[dict[str, Any]]
     error: str
 
 
 class TripReserveState(TypedDict):
     thread_id: str
-    selected_flight: dict
-    selected_hotel: dict
-    selected_car: dict
-    trip_dates: dict
-    reservation: dict
+    selected_flight: dict[str, Any]
+    selected_hotel: dict[str, Any]
+    selected_car: dict[str, Any]
+    trip_dates: dict[str, str]
+    reservation: dict[str, Any]
     status: str
-
-
-class TripModifySearchState(TypedDict):
-    query: str
-    thread_id: str
-    reservation_id: str
-    category: str
-    filters: dict
-    results: list
-    error: str

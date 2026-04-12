@@ -9,6 +9,7 @@ Reserve Pipeline:
 
 import random
 import string
+import threading
 from datetime import datetime, timezone
 
 from langgraph.graph import StateGraph, START, END
@@ -21,6 +22,7 @@ from shared.atlas import get_reservations, get_chat_persistence
 from shared.mongo import get_collection
 from shared.query_parser import parse_query_filters
 from shared.memory import learn_from_thread, load_preferences, format_preferences_for_prompt
+from shared.prompt_loader import load_prompt
 from shared.config import AGENT_ID
 from shared.logger import get_logger
 
@@ -169,16 +171,21 @@ def aggregate_results(state: dict) -> dict:
 
 
 def _learn_from_thread_safe(thread_id: str, state: dict):
-    """Extract and persist user preferences without blocking the pipeline."""
-    try:
-        chat_history = state.get("chat_history", [])
-        query = state.get("query", "")
-        if query:
-            chat_history = chat_history + [{"role": "user", "content": query}]
-        if chat_history:
+    """Extract and persist user preferences in a background thread."""
+    chat_history = list(state.get("chat_history", []))
+    query = state.get("query", "")
+    if query:
+        chat_history = chat_history + [{"role": "user", "content": query}]
+    if not chat_history:
+        return
+
+    def _run():
+        try:
             learn_from_thread(AGENT_ID, chat_history)
-    except Exception as exc:
-        logger.warning("Long-term memory extraction failed (non-fatal): %s", exc)
+        except Exception as exc:
+            logger.warning("Long-term memory extraction failed (non-fatal): %s", exc)
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _save_text_reply(thread_id: str, text: str):
@@ -222,19 +229,15 @@ def _generate_search_summary(query: str, search_results: dict) -> str:
         prefs = load_preferences(AGENT_ID)
         prefs_section = ""
         if prefs:
-            prefs_section = "\n\nUser's known preferences:\n" + \
-                "\n".join(f"- {p.get('fact','')}" for p in prefs) + \
-                "\nMention if any result matches a known preference."
+            prefs_section = ("\n\nUser's known preferences:\n"
+                + "\n".join(f"- {p.get('fact','')}" for p in prefs)
+                + "\nMention if any result matches a known preference.")
 
-        prompt = (
-            f'The user asked: "{query}"\n\n'
-            f"Search results found:\n" + "\n".join(brief) + prefs_section + "\n\n"
-            "Write a brief, friendly 1-3 sentence summary of what was found. "
-            "Be conversational and natural — not robotic. Mention key highlights. "
-            "If some categories had no results, mention that naturally. "
-            "Do NOT list every result — just give a warm overview. "
-            "Do NOT use bullet points or numbered lists. "
-            "Return ONLY the summary text, no JSON."
+        prompt = load_prompt(
+            "search_summary",
+            query=query,
+            results_brief="\n".join(brief),
+            prefs_section=prefs_section,
         )
         return llm.invoke(prompt).strip().strip('"')
     except Exception as exc:

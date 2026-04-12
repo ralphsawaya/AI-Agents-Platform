@@ -1,6 +1,0 @@
-name: agent_flight
-role: flight_search
-description: Searches for flights using MongoDB Atlas vector search with Voyage AI embeddings
-model: voyage-3-lite
-temperature: 0.0
-max_tokens: 2048

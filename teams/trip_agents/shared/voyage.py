@@ -1,10 +1,11 @@
 """Voyage AI embedding client.
 
 Wraps the Voyage AI REST API to generate embeddings for text queries
-used in MongoDB Atlas $vectorSearch.
+used in MongoDB Atlas $vectorSearch. Includes retry logic for transient failures.
 """
 
 import requests
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from shared.config import VOYAGE_MODEL
 from shared.mongo import load_voyage_api_key
@@ -13,8 +14,17 @@ from shared.logger import get_logger
 logger = get_logger("shared.voyage")
 
 VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings"
+VOYAGE_TIMEOUT = 60
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type((requests.RequestException, requests.Timeout)),
+    before_sleep=lambda rs: logger.warning(
+        "Voyage API call failed (attempt %d), retrying: %s", rs.attempt_number, rs.outcome.exception()
+    ),
+)
 def embed_texts(texts: list[str], model: str | None = None,
                 input_type: str = "document") -> list[list[float]]:
     """Embed a batch of texts using the Voyage AI API."""
@@ -35,7 +45,7 @@ def embed_texts(texts: list[str], model: str | None = None,
             "input": texts,
             "input_type": input_type,
         },
-        timeout=60,
+        timeout=VOYAGE_TIMEOUT,
     )
     response.raise_for_status()
     return [item["embedding"] for item in response.json()["data"]]

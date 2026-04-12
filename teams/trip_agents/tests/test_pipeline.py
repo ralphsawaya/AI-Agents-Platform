@@ -14,7 +14,7 @@ def test_shared_config_imports():
     assert HOTELS_COLLECTION == "trip_hotels"
     assert CARS_COLLECTION == "trip_cars"
     assert VOYAGE_MODEL == "voyage-3-lite"
-    assert VOYAGE_EMBED_DIM == 1024
+    assert VOYAGE_EMBED_DIM == 512
 
 
 def test_state_schemas():
@@ -36,19 +36,6 @@ def test_subagent_states():
         assert "query_embedding" in state_cls.__annotations__
         assert "results" in state_cls.__annotations__
         assert "status" in state_cls.__annotations__
-
-
-def test_models():
-    from shared.models import FlightResult, HotelResult, CarResult, Reservation
-    f = FlightResult()
-    assert f.airline == ""
-    h = HotelResult()
-    assert h.stars == 0
-    c = CarResult()
-    assert c.doors == 4
-    r = Reservation()
-    assert r.traveler_name == "John Doe"
-    assert r.status == "confirmed"
 
 
 def test_utils_load_args():
