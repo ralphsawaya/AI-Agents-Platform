@@ -1,8 +1,8 @@
 """Local MongoDB helper for trip agents.
 
 Connects to the platform's local MongoDB for team_settings lookups
-and search-progress ephemeral data.  Chat persistence and long-term
-memory live on Atlas — see atlas.py.
+and LLM/key configuration.  All trip domain data (including search
+progress and seed status) lives on Atlas — see atlas.py.
 """
 
 from pymongo import MongoClient

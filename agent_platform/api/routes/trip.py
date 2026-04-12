@@ -1,7 +1,7 @@
 """Trip Planner data API routes for the custom dashboard tab.
 
-Manages chat thread persistence (local MongoDB) and exposes reservation
-data from Atlas MongoDB for display in the Trip Planner UI.
+All trip-related data lives on Atlas MongoDB, including chat threads,
+reservations, search progress, and seed status.
 Includes a seed endpoint that populates Atlas with sample trip data.
 """
 
@@ -171,8 +171,14 @@ async def delete_thread(agent_id: str, thread_id: str):
 @router.get("/{agent_id}/threads/{thread_id}/search-progress")
 async def search_progress(agent_id: str, thread_id: str):
     """Return partial search results as each sub-agent finishes."""
-    db = get_database()
-    doc = await db["trip_search_progress"].find_one({"_id": thread_id})
+    try:
+        uri = await _get_atlas_uri(agent_id)
+        atlas_db = _get_atlas_db(uri)
+        if atlas_db is None:
+            return _ok({"active": False, "flights": None, "hotels": None, "cars": None, "done": False})
+        doc = atlas_db["trip_search_progress"].find_one({"_id": thread_id})
+    except Exception:
+        doc = None
     if not doc:
         return _ok({"active": False, "flights": None, "hotels": None, "cars": None, "done": False})
     return _ok({
@@ -294,8 +300,10 @@ async def send_message(agent_id: str, thread_id: str, body: SendMessageBody):
         chat_history = [{"role": m["role"], "content": m["content"]} for m in recent
                         if m.get("role") in ("user", "assistant") and m.get("content")]
 
-        local_db = get_database()
-        await local_db["trip_search_progress"].delete_one({"_id": thread_id})
+        try:
+            atlas_db["trip_search_progress"].delete_one({"_id": thread_id})
+        except Exception:
+            pass
 
         run_doc = await execute_agent(
             agent_id=agent_id,
@@ -346,8 +354,10 @@ async def send_message(agent_id: str, thread_id: str, body: SendMessageBody):
             {"$push": {"messages": user_msg}, "$set": {"updated_at": now}},
         )
 
-        local_db = get_database()
-        await local_db["trip_search_progress"].delete_one({"_id": thread_id})
+        try:
+            atlas_db["trip_search_progress"].delete_one({"_id": thread_id})
+        except Exception:
+            pass
 
         recent = thread.get("messages", [])[-8:]
         chat_history = [{"role": m["role"], "content": m["content"]} for m in recent
@@ -612,24 +622,14 @@ async def seed_data(agent_id: str, background_tasks: BackgroundTasks):
     return _ok({"started": True, "message": "Seeding started in background"})
 
 
-_sync_local_client: MongoClient | None = None
-
-
-def _get_sync_local_db():
-    """Synchronous PyMongo client for local MongoDB — safe to use from background threads."""
-    global _sync_local_client
-    if _sync_local_client is None:
-        local_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-        _sync_local_client = MongoClient(local_uri)
-    return _sync_local_client[os.getenv("MONGODB_DB_NAME", "agent_platform")]
-
-
 def _update_seed_progress(agent_id: str, status: str,
-                          detail: str = "", error: str = ""):
-    """Store seed progress in local MongoDB (synchronous)."""
+                          detail: str = "", error: str = "",
+                          atlas_db=None):
+    """Store seed progress in Atlas MongoDB (synchronous)."""
     try:
-        db = _get_sync_local_db()
-        db["trip_seed_status"].update_one(
+        if atlas_db is None:
+            return
+        atlas_db["trip_seed_status"].update_one(
             {"_id": agent_id},
             {"$set": {"status": status, "detail": detail, "error": error,
                       "updated_at": datetime.now(timezone.utc)}},
@@ -642,7 +642,8 @@ def _update_seed_progress(agent_id: str, status: str,
 def _run_seed(atlas_db, voyage_key: str, agent_id: str):
     """Synchronous background task that seeds all three collections."""
     try:
-        _update_seed_progress(agent_id, "running", "Generating flight data...")
+        _update_seed_progress(agent_id, "running", "Generating flight data...",
+                              atlas_db=atlas_db)
 
         for col_name, generator in [
             ("trip_flights", _gen_flights),
@@ -650,40 +651,52 @@ def _run_seed(atlas_db, voyage_key: str, agent_id: str):
             ("trip_cars", _gen_cars),
         ]:
             _update_seed_progress(agent_id, "running",
-                                  f"Generating {col_name} documents...")
+                                  f"Generating {col_name} documents...",
+                                  atlas_db=atlas_db)
             docs = generator(DOCS_PER_COLLECTION)
             texts = [d["text_description"] for d in docs]
 
             _update_seed_progress(agent_id, "running",
-                                  f"Embedding {col_name} ({len(texts)} texts)...")
+                                  f"Embedding {col_name} ({len(texts)} texts)...",
+                                  atlas_db=atlas_db)
             embeddings = _embed_all(texts, voyage_key)
             for doc, emb in zip(docs, embeddings):
                 doc["embedded_description"] = emb
 
             _update_seed_progress(agent_id, "running",
-                                  f"Inserting {col_name} into Atlas...")
+                                  f"Inserting {col_name} into Atlas...",
+                                  atlas_db=atlas_db)
             col = atlas_db[col_name]
             col.drop()
             col.insert_many(docs)
 
             _update_seed_progress(agent_id, "running",
-                                  f"Creating vector index on {col_name}...")
+                                  f"Creating vector index on {col_name}...",
+                                  atlas_db=atlas_db)
             _create_vector_index(col)
             logger.info("Seeded %s with %d documents", col_name, len(docs))
 
         _update_seed_progress(agent_id, "complete",
                               "All 3 collections seeded & indexes created. "
-                              "Indexes may take ~30s to become active.")
+                              "Indexes may take ~30s to become active.",
+                              atlas_db=atlas_db)
     except Exception as exc:
         logger.exception("Seed failed: %s", exc)
-        _update_seed_progress(agent_id, "error", error=str(exc))
+        _update_seed_progress(agent_id, "error", error=str(exc),
+                              atlas_db=atlas_db)
 
 
 @router.get("/{agent_id}/seed/progress")
 async def seed_progress(agent_id: str):
     """Poll seed operation progress."""
-    db = get_database()
-    doc = await db["trip_seed_status"].find_one({"_id": agent_id})
+    try:
+        uri = await _get_atlas_uri(agent_id)
+        atlas_db = _get_atlas_db(uri)
+        if atlas_db is None:
+            return _ok({"status": "idle"})
+        doc = atlas_db["trip_seed_status"].find_one({"_id": agent_id})
+    except Exception:
+        doc = None
     if not doc:
         return _ok({"status": "idle"})
     return _ok({

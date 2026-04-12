@@ -190,9 +190,10 @@
                 const mode = res.data.mode || 'chat';
                 if (mode === 'cancel' || mode === 'update') {
                     await pollReservation(res.data.run_id);
-                } else if (mode === 'modify') {
-                    await pollRun(res.data.run_id);
                 } else {
+                    document.getElementById('resultsPanel').innerHTML = '';
+                    selected = { flight: null, hotel: null, car: null };
+                    latestResults = null;
                     await pollRun(res.data.run_id);
                 }
             } else {
@@ -224,30 +225,26 @@
     async function pollRun(runId) {
         _partialRendered = { flights: false, hotels: false, cars: false };
         _searchSpinnersShown = false;
-        const maxAttempts = 90;
+        _showSearchSpinners();
+        const maxAttempts = 120;
         for (let i = 0; i < maxAttempts; i++) {
-            await sleep(i < 2 ? 500 : 1000);
+            await sleep(500);
             try {
-                const run = await API.get(`/api/runs/${runId}`);
-                const status = run && run.data ? run.data.status : null;
-                if (status && ['completed', 'success', 'failed', 'error'].includes(status)) {
-                    await reloadThread();
-                    return;
-                }
                 if (activeThread) {
                     const prog = await API.get(`${BASE}/threads/${activeThread}/search-progress`);
-                    if (prog.success && prog.data) {
-                        if (prog.data.active && !prog.data.done) {
-                            _showSearchSpinners();
-                        }
-                        if (prog.data.active) {
-                            _renderPartialResults(prog.data);
-                        }
+                    if (prog.success && prog.data && prog.data.active) {
+                        _renderPartialResults(prog.data);
                         if (prog.data.done) {
                             await reloadThread();
                             return;
                         }
                     }
+                }
+                const run = await API.get(`/api/runs/${runId}`);
+                const status = run && run.data ? run.data.status : null;
+                if (status && ['completed', 'success', 'failed', 'error'].includes(status)) {
+                    await reloadThread();
+                    return;
                 }
             } catch (_) {}
         }
@@ -491,17 +488,21 @@
 
     window.confirmReservation = async function () {
         if ((!selected.flight && !selected.hotel && !selected.car) || !activeThread) return;
-        const reserveBtn = document.getElementById('reserveBtn');
-        if (reserveBtn) { reserveBtn.disabled = true; reserveBtn.textContent = 'Confirming...'; }
         document.getElementById('sendBtn').disabled = true;
 
+        const payload = {
+            trip_dates: { start: new Date().toISOString().slice(0, 10), end: new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 10) }
+        };
+        if (selected.flight) payload.selected_flight = selected.flight;
+        if (selected.hotel) payload.selected_hotel = selected.hotel;
+        if (selected.car) payload.selected_car = selected.car;
+
+        const panel = document.getElementById('resultsPanel');
+        panel.innerHTML = '<div class="reservation-banner" style="background:#f9e2af;color:#1e1e2e;">Confirming your reservation...</div>';
+        selected = { flight: null, hotel: null, car: null };
+        latestResults = null;
+
         try {
-            const payload = {
-                    trip_dates: { start: new Date().toISOString().slice(0, 10), end: new Date(Date.now() + 86400000 * 3).toISOString().slice(0, 10) }
-                };
-            if (selected.flight) payload.selected_flight = selected.flight;
-            if (selected.hotel) payload.selected_hotel = selected.hotel;
-            if (selected.car) payload.selected_car = selected.car;
             const res = await API.post(`${BASE}/threads/${activeThread}/messages`, {
                 message: `__RESERVE__${JSON.stringify(payload)}`
             });
@@ -509,17 +510,19 @@
                 await pollReservation(res.data.run_id);
             } else {
                 toast('Reservation failed: ' + ((res && res.error) || 'unknown'), 'error');
+                await reloadThread();
             }
         } catch (e) {
             toast('Reservation failed', 'error');
+            await reloadThread();
         }
         document.getElementById('sendBtn').disabled = false;
     };
 
     async function pollReservation(runId) {
-        const maxAttempts = 60;
+        const maxAttempts = 90;
         for (let i = 0; i < maxAttempts; i++) {
-            await sleep(1500);
+            await sleep(500);
             try {
                 const run = await API.get(`/api/runs/${runId}`);
                 const status = run && run.data ? run.data.status : null;
@@ -534,13 +537,13 @@
 
     function showReservationBanner(res) {
         const panel = document.getElementById('resultsPanel');
-        const existing = panel.querySelector('.reservation-banner');
-        if (!existing) {
-            const div = document.createElement('div');
-            div.className = 'reservation-banner';
-            div.textContent = `Reservation confirmed! Total: EUR ${(res.total_cost_eur || 0).toFixed(2)} — Traveler: ${res.traveler_name || 'John Doe'}`;
-            panel.prepend(div);
-        }
+        panel.innerHTML = '';
+        selected = { flight: null, hotel: null, car: null };
+        latestResults = null;
+        const div = document.createElement('div');
+        div.className = 'reservation-banner';
+        div.textContent = `Reservation confirmed! Total: EUR ${(res.total_cost_eur || 0).toFixed(2)} — Traveler: ${res.traveler_name || 'John Doe'}`;
+        panel.appendChild(div);
     }
 
     function showCancellationBanner(cancel) {

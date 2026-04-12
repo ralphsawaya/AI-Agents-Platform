@@ -236,13 +236,8 @@ All trip domain data lives on Atlas in the `trip_data` database:
 | `trip_reservations` | Confirmed bookings | `_id` (human-readable `TRIP-YYYYMMDD-XXXX`), `flight`, `hotel`, `car`, `trip_dates`, `total_cost_eur`, `status`, `agent_id` |
 | `trip_chatPersistence` | Chat thread history | `agent_id`, `title`, `messages[]` (role, content, timestamp, search_results, reservation, cancellation, modify_results), `created_at`, `updated_at` |
 | `trip_longMemory` | Learned user preferences | `_id` (agent_id), `preferences[]` (fact, category, learned_at), `updated_at` |
-
-### Local MongoDB (Platform)
-
-| Collection | Purpose |
-|------------|---------|
-| `trip_search_progress` | Ephemeral — tracks partial search results for progressive UI streaming |
-| `trip_seed_status` | Tracks data seeding progress and status |
+| `trip_search_progress` | Ephemeral — tracks partial search results for progressive UI streaming | `_id` (thread_id), `flights`, `hotels`, `cars`, `done`, `started_at` |
+| `trip_seed_status` | Tracks data seeding progress and status | `_id` (agent_id), `status`, `detail`, `error`, `updated_at` |
 
 ---
 
@@ -359,7 +354,7 @@ trip_agents/
 ├── agent_car/            # (same structure as agent_flight)
 ├── shared/
 │   ├── atlas.py          # Atlas client, vector_search, collection accessors
-│   ├── mongo.py          # Local MongoDB client, team_settings, LLM config
+│   ├── mongo.py          # Local MongoDB client, team_settings, LLM/key config
 │   ├── llm.py            # Multi-provider LLM wrapper (cached, retry, timeouts)
 │   ├── voyage.py         # Voyage AI embedding client (retry-enabled)
 │   ├── query_parser.py   # LLM-based intent + filter extraction

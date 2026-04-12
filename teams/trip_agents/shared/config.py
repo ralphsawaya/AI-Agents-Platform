@@ -35,6 +35,8 @@ CARS_COLLECTION = "trip_cars"
 RESERVATIONS_COLLECTION = "trip_reservations"
 CHAT_COLLECTION = "trip_chatPersistence"
 LONG_MEMORY_COLLECTION = "trip_longMemory"
+SEARCH_PROGRESS_COLLECTION = "trip_search_progress"
+SEED_STATUS_COLLECTION = "trip_seed_status"
 
 # --- Available LLM models per provider ---
 LLM_PROVIDERS = {

@@ -18,8 +18,7 @@ from orchestrator.state import TripSearchState, TripReserveState
 from agent_flight.agent import build_flight_graph
 from agent_hotel.agent import build_hotel_graph
 from agent_car.agent import build_car_graph
-from shared.atlas import get_reservations, get_chat_persistence
-from shared.mongo import get_collection
+from shared.atlas import get_reservations, get_chat_persistence, get_search_progress
 from shared.query_parser import parse_query_filters
 from shared.memory import learn_from_thread, load_preferences, format_preferences_for_prompt
 from shared.prompt_loader import load_prompt
@@ -28,15 +27,12 @@ from shared.logger import get_logger
 
 logger = get_logger("orchestrator.graph")
 
-PROGRESS_COLLECTION = "trip_search_progress"
-
-
 def _publish_partial(thread_id: str, category: str, results: list):
-    """Write partial search results to local MongoDB so the UI can stream them."""
+    """Write partial search results to Atlas so the UI can stream them."""
     if not thread_id:
         return
     try:
-        get_collection(PROGRESS_COLLECTION).update_one(
+        get_search_progress().update_one(
             {"_id": thread_id},
             {"$set": {category: results, f"{category}_at": datetime.now(timezone.utc)}},
             upsert=True,
@@ -77,7 +73,7 @@ def parse_query(state: dict) -> dict:
     thread_id = state.get("thread_id", "")
     if thread_id:
         try:
-            get_collection(PROGRESS_COLLECTION).update_one(
+            get_search_progress().update_one(
                 {"_id": thread_id},
                 {"$set": {"flights": None, "hotels": None, "cars": None, "done": False,
                            "started_at": datetime.now(timezone.utc)}},
@@ -160,7 +156,7 @@ def aggregate_results(state: dict) -> dict:
     if thread_id:
         _save_assistant_message(thread_id, state.get("query", ""), search_results)
         try:
-            get_collection(PROGRESS_COLLECTION).update_one(
+            get_search_progress().update_one(
                 {"_id": thread_id}, {"$set": {"done": True}},
             )
         except Exception:

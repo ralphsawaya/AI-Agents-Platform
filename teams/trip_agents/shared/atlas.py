@@ -1,7 +1,8 @@
 """Atlas MongoDB client for trip domain collections.
 
-trip_flights, trip_hotels, trip_cars, and trip_reservations live on
-MongoDB Atlas and are accessed through this module.
+All trip-related collections live on MongoDB Atlas and are accessed
+through this module: flights, hotels, cars, reservations, chat
+persistence, long-term memory, search progress, and seed status.
 """
 
 import certifi
@@ -12,6 +13,7 @@ from shared.config import (
     FLIGHTS_COLLECTION, HOTELS_COLLECTION,
     CARS_COLLECTION, RESERVATIONS_COLLECTION,
     CHAT_COLLECTION, LONG_MEMORY_COLLECTION,
+    SEARCH_PROGRESS_COLLECTION, SEED_STATUS_COLLECTION,
 )
 from shared.mongo import load_atlas_uri
 from shared.logger import get_logger
@@ -60,6 +62,14 @@ def get_chat_persistence() -> Collection:
 
 def get_long_memory() -> Collection:
     return get_atlas_collection(LONG_MEMORY_COLLECTION)
+
+
+def get_search_progress() -> Collection:
+    return get_atlas_collection(SEARCH_PROGRESS_COLLECTION)
+
+
+def get_seed_status() -> Collection:
+    return get_atlas_collection(SEED_STATUS_COLLECTION)
 
 
 def vector_search(collection: Collection, query_vector: list[float],

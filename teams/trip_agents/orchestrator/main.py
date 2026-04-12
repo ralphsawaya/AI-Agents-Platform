@@ -220,7 +220,7 @@ def run_modify(args: dict):
     from shared.llm import get_llm
     from shared.prompt_loader import load_prompt
     from shared.query_parser import _clean_flight_filters, _clean_hotel_filters, _clean_car_filters
-    from shared.mongo import get_collection
+    from shared.atlas import get_search_progress
     from agent_flight.agent import build_flight_graph
     from agent_hotel.agent import build_hotel_graph
     from agent_car.agent import build_car_graph
@@ -292,7 +292,7 @@ def run_modify(args: dict):
 
     if thread_id:
         try:
-            get_collection("trip_search_progress").update_one(
+            get_search_progress().update_one(
                 {"_id": thread_id},
                 {"$set": {"flights": None, "hotels": None, "cars": None, "done": False,
                            "started_at": datetime.now(timezone.utc)}},
@@ -336,7 +336,7 @@ def run_modify(args: dict):
     progress_key = {"flight": "flights", "hotel": "hotels", "car": "cars"}[category]
     if thread_id:
         try:
-            get_collection("trip_search_progress").update_one(
+            get_search_progress().update_one(
                 {"_id": thread_id},
                 {"$set": {progress_key: results, "done": True}},
             )
