@@ -56,7 +56,7 @@ def parse_query(state: dict) -> dict:
         logger.info("Injecting %d long-term preferences into query parser", len(prefs))
 
     parsed = parse_query_filters(query, chat_history=chat_history, user_prefs=prefs_text)
-    is_search = parsed.get("is_search", True)
+    is_search = parsed.get("is_search", False)
 
     if not is_search:
         reply = parsed.get("reply", "I'm a trip booking assistant. Tell me where you'd like to travel!")
@@ -92,7 +92,7 @@ def parse_query(state: dict) -> dict:
 
 
 def run_flight_search(state: dict) -> dict:
-    if not state.get("is_search", True):
+    if not state.get("is_search", False):
         return {"flight_results": []}
     logger.info("Orchestrator: running Flight Search agent")
     result = build_flight_graph().invoke({
@@ -106,7 +106,7 @@ def run_flight_search(state: dict) -> dict:
 
 
 def run_hotel_search(state: dict) -> dict:
-    if not state.get("is_search", True):
+    if not state.get("is_search", False):
         return {"hotel_results": []}
     logger.info("Orchestrator: running Hotel Search agent")
     result = build_hotel_graph().invoke({
@@ -120,7 +120,7 @@ def run_hotel_search(state: dict) -> dict:
 
 
 def run_car_search(state: dict) -> dict:
-    if not state.get("is_search", True):
+    if not state.get("is_search", False):
         return {"car_results": []}
     logger.info("Orchestrator: running Car Rental Search agent")
     result = build_car_graph().invoke({
@@ -137,7 +137,7 @@ def aggregate_results(state: dict) -> dict:
     """Save final combined message, mark progress as done, and learn preferences."""
     thread_id = state.get("thread_id", "")
 
-    if not state.get("is_search", True):
+    if not state.get("is_search", False):
         reply = state.get("nonsearch_reply", "I'm a trip booking assistant. Tell me where you'd like to travel!")
         logger.info("Orchestrator: non-search — saving reply to thread")
         if thread_id:

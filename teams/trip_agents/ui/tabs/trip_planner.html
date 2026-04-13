@@ -225,7 +225,6 @@
     async function pollRun(runId) {
         _partialRendered = { flights: false, hotels: false, cars: false };
         _searchSpinnersShown = false;
-        _showSearchSpinners();
         const maxAttempts = 120;
         for (let i = 0; i < maxAttempts; i++) {
             await sleep(500);
@@ -233,6 +232,7 @@
                 if (activeThread) {
                     const prog = await API.get(`${BASE}/threads/${activeThread}/search-progress`);
                     if (prog.success && prog.data && prog.data.active) {
+                        _showSearchSpinners();
                         _renderPartialResults(prog.data);
                         if (prog.data.done) {
                             await reloadThread();

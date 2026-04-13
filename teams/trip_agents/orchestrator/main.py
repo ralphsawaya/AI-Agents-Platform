@@ -66,7 +66,7 @@ def run_search(args: dict):
         "error": "",
     })
 
-    if not result.get("is_search", True):
+    if not result.get("is_search", False):
         reply = result.get("nonsearch_reply", "")
         logger.info("Non-search reply: %s", reply[:200])
         output = {"status": "complete", "reply": reply, "thread_id": thread_id}
