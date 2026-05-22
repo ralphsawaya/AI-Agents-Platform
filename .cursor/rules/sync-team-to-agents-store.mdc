@@ -15,8 +15,8 @@ When editing any file under `teams/<team_name>/`, also apply the same change to 
 
 ## Example
 
-If you edit `teams/trading_agents/orchestrator/main.py`, also edit:
-`agent_platform/agents_store/<agent_id>/trading_agents/orchestrator/main.py`
+If you edit `teams/trip_agents/orchestrator/main.py`, also edit:
+`agent_platform/agents_store/<agent_id>/trip_agents/orchestrator/main.py`
 
 ## .env files
 

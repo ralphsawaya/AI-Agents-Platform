@@ -163,26 +163,6 @@
     .ts-btn-save { background:var(--primary);color:#fff;border:none;padding:8px 24px;border-radius:6px;font-size:0.84rem;font-weight:600;cursor:pointer;transition:opacity 0.15s; }
     .ts-btn-save:hover { opacity:0.88; }
     .ts-btn-save:disabled { opacity:0.45;cursor:not-allowed; }
-    /* Trading-specific settings (conditionally shown) */
-    .ts-trading-section { display:none; }
-    .ts-toggle { display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none; }
-    .ts-toggle-track { position:relative;width:44px;height:24px;border-radius:12px;transition:background 0.25s; }
-    .ts-toggle-track.on  { background:#22c55e; }
-    .ts-toggle-track.off { background:#ef4444; }
-    .ts-toggle-thumb { position:absolute;top:2px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left 0.25s;box-shadow:0 1px 3px rgba(0,0,0,0.3); }
-    .ts-toggle-track.on  .ts-toggle-thumb { left:22px; }
-    .ts-toggle-track.off .ts-toggle-thumb { left:2px; }
-    .ts-toggle-label { font-size:0.82rem;font-weight:600; }
-    .ts-toggle-label.on  { color:#4ade80; }
-    .ts-toggle-label.off { color:#f87171; }
-    .ts-settings-grid { display:grid;grid-template-columns:1fr 1fr;gap:16px; }
-    .ts-panel { padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px; }
-    .ts-panel-title { font-size:0.85rem;font-weight:700;margin-bottom:12px; }
-    .ts-form-row { display:flex;align-items:center;gap:10px;margin-bottom:10px; }
-    .ts-form-row:last-child { margin-bottom:0; }
-    .ts-form-row label { flex:0 0 140px;font-size:0.8rem;color:#999; }
-    .ts-form-row input { flex:1;padding:6px 10px;background:var(--surface-2);border:1px solid var(--border);border-radius:6px;color:inherit;font-size:0.85rem; }
-    .ts-form-row input:focus { outline:none;border-color:var(--primary); }
     /* General metadata section */
     .ts-meta-form { padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px; }
     .ts-meta-row { margin-bottom:14px; }
@@ -344,44 +324,6 @@
         </div>
     </div>
 
-    <!-- Trading-specific settings (only visible for trading teams) -->
-    <div class="ts-trading-section" id="ts-trading-section">
-        <div class="ts-section">
-            <div class="ts-section-title">Trading Controls</div>
-            <div class="ts-bar">
-                <div class="ts-toggle" onclick="_ts_toggleKillSwitch()">
-                    <div class="ts-toggle-track off" id="ts-toggle-track">
-                        <div class="ts-toggle-thumb"></div>
-                    </div>
-                    <span class="ts-toggle-label off" id="ts-toggle-text">Loading…</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="ts-settings-grid">
-            <div class="ts-panel">
-                <div class="ts-panel-title">Risk Defaults</div>
-                <div class="ts-form-row"><label>Max Risk / Trade</label><input type="number" id="ts-max-risk" step="0.005" min="0.005" max="0.5" /></div>
-                <div class="ts-form-row"><label>Max Open Positions</label><input type="number" id="ts-max-positions" step="1" min="1" max="50" /></div>
-                <div class="ts-form-row"><label>Max Drawdown</label><input type="number" id="ts-max-drawdown" step="0.01" min="0.01" max="1.0" /></div>
-            </div>
-            <div class="ts-panel">
-                <div class="ts-panel-title">Indicator Periods</div>
-                <div class="ts-form-row"><label>ADX Period</label><input type="number" id="ts-adx" step="1" min="2" max="100" /></div>
-                <div class="ts-form-row"><label>ATR Period</label><input type="number" id="ts-atr" step="1" min="2" max="100" /></div>
-                <div class="ts-form-row"><label>BB Period</label><input type="number" id="ts-bb-period" step="1" min="2" max="100" /></div>
-                <div class="ts-form-row"><label>BB Std Dev</label><input type="number" id="ts-bb-std" step="0.1" min="0.5" max="5.0" /></div>
-                <div class="ts-form-row"><label>EMA Fast</label><input type="number" id="ts-ema-fast" step="1" min="2" max="200" /></div>
-                <div class="ts-form-row"><label>EMA Mid</label><input type="number" id="ts-ema-mid" step="1" min="2" max="200" /></div>
-                <div class="ts-form-row"><label>EMA Slow</label><input type="number" id="ts-ema-slow" step="1" min="2" max="200" /></div>
-                <div class="ts-form-row"><label>RSI Period</label><input type="number" id="ts-rsi" step="1" min="2" max="100" /></div>
-                <div class="ts-form-row"><label>Volume MA Period</label><input type="number" id="ts-vol-ma" step="1" min="2" max="100" /></div>
-            </div>
-        </div>
-        <div class="ts-save-row">
-            <button class="ts-btn-save" id="ts-trading-save-btn" onclick="_ts_saveTradingConfig()">Save Trading Settings</button>
-        </div>
-    </div>
 </div>
 
 <!-- Custom tab content panels are injected here dynamically by JS -->
@@ -1667,12 +1609,11 @@ async function _ts_saveMetadata() {
 }
 
 /* ═══════════════════════════════════════════════
-   Settings tab — LLM config + trading-specific
+   Settings tab — LLM config + team-specific
    ═══════════════════════════════════════════════ */
 (function() {
     let _tsProviderModels = {};
     let _tsLoadedApiKeys = {};
-    let _tsTradingEnabled = false;
 
     const PROVIDER_KEY_LABELS = {
         gemini: "Gemini Key",
@@ -1773,90 +1714,6 @@ async function _ts_saveMetadata() {
             voiceKeyInp.placeholder = maskedVoiceKey ? '' : 'Enter API key';
             voiceKeyInp.dataset.hasSaved = maskedVoiceKey ? '1' : '';
         }
-    }
-
-    /* -- Trading-specific settings -- */
-
-    function tsRenderToggle(enabled) {
-        const track = document.getElementById('ts-toggle-track');
-        const label = document.getElementById('ts-toggle-text');
-        if (!track) return;
-        track.className = 'ts-toggle-track ' + (enabled ? 'on' : 'off');
-        label.className = 'ts-toggle-label ' + (enabled ? 'on' : 'off');
-        label.textContent = enabled ? 'Trading ON' : 'Trading OFF';
-    }
-
-    window._ts_toggleKillSwitch = async function() {
-        const newState = !_tsTradingEnabled;
-        const res = await API.post('/api/trading/toggle', { enabled: newState });
-        if (res.success) {
-            _tsTradingEnabled = newState;
-            tsRenderToggle(newState);
-            toast(newState ? 'Trading ENABLED' : 'Trading DISABLED', newState ? 'success' : 'error');
-        }
-    };
-
-    async function tsLoadTradingConfig() {
-        const res = await API.get('/api/trading/config');
-        if (!res.success || !res.data) return;
-        const c = res.data;
-
-        _tsTradingEnabled = c.trading_enabled;
-        tsRenderToggle(c.trading_enabled);
-
-        const rd = c.risk_defaults || {};
-        document.getElementById('ts-max-risk').value      = rd.max_risk_per_trade ?? 0.02;
-        document.getElementById('ts-max-positions').value  = rd.max_open_positions ?? 3;
-        document.getElementById('ts-max-drawdown').value   = rd.max_drawdown ?? 0.10;
-
-        const ip = c.indicator_periods || {};
-        document.getElementById('ts-adx').value       = ip.adx_period ?? 14;
-        document.getElementById('ts-atr').value       = ip.atr_period ?? 14;
-        document.getElementById('ts-bb-period').value = ip.bb_period ?? 20;
-        document.getElementById('ts-bb-std').value    = ip.bb_std ?? 2.0;
-        document.getElementById('ts-ema-fast').value  = ip.ema_fast ?? 9;
-        document.getElementById('ts-ema-mid').value   = ip.ema_mid ?? 21;
-        document.getElementById('ts-ema-slow').value  = ip.ema_slow ?? 50;
-        document.getElementById('ts-rsi').value       = ip.rsi_period ?? 14;
-        document.getElementById('ts-vol-ma').value    = ip.volume_ma_period ?? 20;
-    }
-
-    window._ts_saveTradingConfig = async function() {
-        const btn = document.getElementById('ts-trading-save-btn');
-        btn.disabled = true; btn.textContent = 'Saving…';
-
-        const body = {
-            trading_enabled: _tsTradingEnabled,
-            risk_defaults: {
-                max_risk_per_trade: parseFloat(document.getElementById('ts-max-risk').value),
-                max_open_positions: parseInt(document.getElementById('ts-max-positions').value, 10),
-                max_drawdown:       parseFloat(document.getElementById('ts-max-drawdown').value),
-            },
-            indicator_periods: {
-                adx_period:       parseInt(document.getElementById('ts-adx').value, 10),
-                atr_period:       parseInt(document.getElementById('ts-atr').value, 10),
-                bb_period:        parseInt(document.getElementById('ts-bb-period').value, 10),
-                bb_std:           parseFloat(document.getElementById('ts-bb-std').value),
-                ema_fast:         parseInt(document.getElementById('ts-ema-fast').value, 10),
-                ema_mid:          parseInt(document.getElementById('ts-ema-mid').value, 10),
-                ema_slow:         parseInt(document.getElementById('ts-ema-slow').value, 10),
-                rsi_period:       parseInt(document.getElementById('ts-rsi').value, 10),
-                volume_ma_period: parseInt(document.getElementById('ts-vol-ma').value, 10),
-            },
-        };
-
-        const res = await API.put('/api/trading/config', body);
-        btn.disabled = false; btn.textContent = 'Save Trading Settings';
-        if (res.success) { toast('Trading settings saved', 'success'); tsLoadTradingConfig(); }
-        else { toast('Failed to save: ' + (res.error || 'unknown'), 'error'); }
-    };
-
-    function _isTrading(agent) {
-        if ((agent.tags || []).includes('trading')) return true;
-        const tabs = agent.custom_tabs || [];
-        if (tabs.some(t => t.id === 'trading')) return true;
-        if ((agent.root_folder || '').includes('trading')) return true;
-        return false;
     }
 
     function _isTrip(agent) {
@@ -2152,10 +2009,6 @@ async function _ts_saveMetadata() {
         _ts_populateMetadata(agent);
         tsLoadSettings();
         tsLoadIntegrations();
-        if (_isTrading(agent)) {
-            document.getElementById('ts-trading-section').style.display = 'block';
-            tsLoadTradingConfig();
-        }
         if (_isTrip(agent)) {
             document.getElementById('ts-trip-section').style.display = 'block';
             _ts_initTripSection();

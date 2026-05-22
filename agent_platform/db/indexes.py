@@ -1,11 +1,9 @@
-from pymongo.errors import CollectionInvalid, OperationFailure
+from pymongo.errors import OperationFailure
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
 from agent_platform.config import settings
-
-_OHLCV_TTL_SECONDS = 4 * 365 * 24 * 60 * 60
 
 
 async def _safe_create_indexes(collection, indexes: list[IndexModel]) -> None:
@@ -61,70 +59,7 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
         ),
     ])
 
-    # --- Trading collections ---
-
-    market_regimes = db["market_regimes"]
-    await _safe_create_indexes(market_regimes, [
-        IndexModel([("timestamp", DESCENDING)]),
-        IndexModel(
-            [("created_at", ASCENDING)],
-            expireAfterSeconds=30 * 86400,
-        ),
-    ])
-
-    strategy_selections = db["strategy_selections"]
-    await _safe_create_indexes(strategy_selections, [
-        IndexModel([("timestamp", DESCENDING)]),
-        IndexModel([("active_strategy", ASCENDING)]),
-    ])
-
-    trade_signals = db["trade_signals"]
-    await _safe_create_indexes(trade_signals, [
-        IndexModel([("timestamp", DESCENDING)]),
-        IndexModel([("strategy_name", ASCENDING)]),
-        IndexModel([("matched", ASCENDING)]),
-        IndexModel(
-            [("created_at", ASCENDING)],
-            expireAfterSeconds=90 * 86400,
-        ),
-    ])
-
-    trades = db["trades"]
-    await _safe_create_indexes(trades, [
-        IndexModel([("timestamp", DESCENDING)]),
-        IndexModel([("status", ASCENDING)]),
-        IndexModel([("side", ASCENDING)]),
-    ])
-
-    risk_state = db["risk_state"]
-    await _safe_create_indexes(risk_state, [
-        IndexModel([("updated_at", DESCENDING)]),
-    ])
-
-    # --- Backtest strategies (built-in + custom) ---
-    backtest_strategies = db["backtest_strategies"]
-    await _safe_create_indexes(backtest_strategies, [
-        IndexModel([("created_at", ASCENDING)]),
-        # Sparse unique index so seeded-strategy upserts are idempotent.
-        IndexModel([("_builtin_id", ASCENDING)], unique=True, sparse=True),
-    ])
-
-    # --- Per-team LLM settings ---
     team_settings = db["team_settings"]
     await _safe_create_indexes(team_settings, [
         IndexModel([("updated_at", DESCENDING)]),
     ])
-
-    # --- OHLCV timeseries cache (4-year TTL) ---
-    try:
-        await db.create_collection(
-            "ohlcv",
-            timeseries={
-                "timeField": "timestamp",
-                "metaField": "meta",
-                "granularity": "minutes",
-            },
-            expireAfterSeconds=_OHLCV_TTL_SECONDS,
-        )
-    except CollectionInvalid:
-        pass

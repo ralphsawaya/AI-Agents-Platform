@@ -1,388 +1,365 @@
 # Trip Agents
 
-Multi-agent travel booking system powered by **LangGraph**, **MongoDB Atlas vector search**, and **Voyage AI** embeddings. Supports natural-language trip search, reservation management, and conversational interactions with short-term and long-term memory.
+An AI-powered travel assistant that helps people search for flights, hotels, and rental cars in plain language, compare options, and manage bookings — all through a conversational interface.
 
 ---
 
-## Architecture Overview
+## For Business Stakeholders
+
+### What this product does
+
+Trip Agents is a **virtual travel planner** embedded in the AI Agent Platform. Instead of filling out separate forms for flights, hotels, and cars, users describe what they want in natural language — for example:
+
+> *"I'm flying from Doha to Athens in early March. I need a quiet hotel near the river with a bar, and a manual Kia for getting around."*
+
+The assistant understands the request, searches a catalog of travel options, presents the best matches, and can help the user **confirm a reservation**, **change** an existing booking, or **cancel** it — all within the same chat experience.
+
+### Who it is for
+
+- **Travelers and planners** who want a faster, conversational way to explore trip options
+- **Product and operations teams** evaluating how multi-agent AI can automate search-and-book workflows
+- **Demo and pilot use cases** where realistic sample inventory (flights, hotels, cars) is sufficient — this is not connected to live GDS or OTA APIs
+
+### What users can do today
+
+| Capability | User experience |
+|------------|-----------------|
+| **Search trips** | Ask for flights, hotels, cars, or any combination. Results appear on the left; the assistant explains and recommends a bundle on the right. |
+| **Get inspired** | Click a suggested prompt (built from real sample data) or type freely. Up to five chat threads are supported. |
+| **Review and select** | Browse ranked options, expand details, select cards manually, or accept the assistant's proposed package. |
+| **Book** | Confirm a reservation; the system assigns a readable ID (`TRIP-20260522-A1B2`) and stores it. |
+| **Modify** | Reference a reservation ID in chat and ask to change the flight, hotel, or car; pick a replacement and apply it. |
+| **Cancel** | Ask to cancel a reservation by ID, or delete it from the Reservations tab. |
+| **Personalization** | The assistant learns preferences over time (e.g. "prefers business class", "avoids diesel cars") and applies them in future searches. Users can view and clear stored memories. |
+
+### How a typical journey works
 
 ```
-                         ┌─────────────────────────────┐
-                         │     FastAPI (trip.py)        │
-                         │  Intent Detection & Routing  │
-                         └──────────┬──────────────────┘
-                                    │
-                    ┌───────────────┼───────────────────┐
-                    ▼               ▼                   ▼
-              mode=chat        mode=reserve        mode=modify
-              mode=cancel      mode=update
-                    │               │                   │
-                    ▼               ▼                   ▼
-         ┌──────────────────┐  ┌──────────┐    ┌──────────────┐
-         │   Orchestrator   │  │  Reserve  │    │    Modify    │
-         │   (LangGraph)    │  │  Pipeline │    │  LLM-based   │
-         │                  │  │           │    │  category    │
-         │  parse_query     │  │  create_  │    │  detection   │
-         │       │          │  │reservation│    │      ↓       │
-         │  ┌────┼────┐     │  └──────────┘    │  Reuses sub- │
-         │  ▼    ▼    ▼     │                  │  agent graph │
-         │flight hotel car  │                  └──────────────┘
-         │  └────┼────┘     │
-         │       ▼          │
-         │   aggregate      │
-         └──────────────────┘
+1. User opens Trip Planner
+2. User describes a trip (or clicks a suggested prompt)
+3. Assistant searches flights / hotels / cars as requested
+4. Results stream into the left panel; assistant summarizes and may propose a bundle
+5. User confirms selections → reservation is created
+6. Later: user can modify or cancel via chat or the Reservations tab
 ```
 
-### Design Decisions
+### What makes it different from a simple chatbot
 
-- **Deterministic search pipelines**: Sub-agents use fixed `embed → search → END` graphs rather than LLM-driven tool-calling loops. This is intentional — for a vector-search-only pipeline, deterministic execution is faster, more predictable, and easier to debug than adaptive agent behavior.
-- **Conditional error edges**: Sub-agents short-circuit to `END` on embedding failure instead of running a guaranteed-to-fail search node.
-- **Unified state**: All three sub-agents share a single `SearchAgentState` definition to eliminate code duplication.
-- **Centralized prompts**: All LLM system prompts are stored as external text files in `shared/prompts/` and loaded via `shared/prompt_loader.py`, enabling prompt iteration without touching Python source.
-- **Resilience**: LLM and Voyage API calls include automatic retry with exponential backoff (via `tenacity`). LLM clients are cached per provider+model to avoid redundant connection setup.
-- **Non-blocking memory**: Long-term preference extraction runs in a background thread so it never delays the search response.
+- **Structured search, not hallucination** — Options come from a real MongoDB Atlas catalog with semantic (meaning-based) search, not invented listings.
+- **Selective planning** — The AI decides *which* categories to search (flights only, hotel + car, full trip, etc.) instead of always running everything.
+- **Memory** — Short-term context within a chat thread plus long-term preferences across sessions.
+- **Human in the loop** — Nothing is booked without explicit user confirmation.
+
+### Setup requirements (non-technical summary)
+
+Before the assistant can search, an administrator must:
+
+1. Connect **MongoDB Atlas** (where trip inventory and conversations live)
+2. Add a **Voyage AI** key (powers semantic search quality)
+3. Choose an **LLM provider** (e.g. Claude, Gemini, OpenAI) in the agent Settings tab
+4. Load **sample data** once via Settings → "Load Sample Data" (3,000 documents: flights, hotels, cars)
+
+### Limitations to be aware of
+
+- Inventory is **synthetic sample data**, not live airline or hotel feeds
+- LLM usage depends on provider quotas and API keys; if the model is unavailable, search cannot start
+- Reservations use a placeholder traveler name in the current implementation
+- Maximum **five** concurrent chat threads per agent
 
 ---
 
-## Orchestrator Modes
+## For Developers & Architects
 
-The orchestrator (`orchestrator/main.py`) supports six modes, determined by the API route's intent detection layer:
+### System context
 
-| Mode | Trigger | Description |
-|------|---------|-------------|
-| `chat` | Any natural-language message | LLM classifies as search or conversation; runs search pipeline or returns a text reply |
-| `search` | Stateless prompt via `run_config.json` | Direct search pipeline invocation |
-| `reserve` | Internal `__RESERVE__` payload from UI | Creates a new reservation from selected options |
-| `cancel` | Message contains reservation ID + cancel keywords | Deletes a reservation from Atlas |
-| `modify` | Message contains reservation ID + change/swap/replace keywords | Targeted single-category search using the same sub-agent graphs as the main pipeline, with relaxed retry on empty results |
-| `update` | Internal `__UPDATE__` payload from UI | Applies a selected replacement to an existing reservation |
-
-### Intent Detection
-
-The API route (`trip.py`) uses a deterministic routing layer before any LLM call:
-
-1. **`__RESERVE__` / `__UPDATE__` prefixes** — Internal UI payloads, routed directly
-2. **Reservation ID regex** (`TRIP-\d{8}-[A-Z0-9]{4}`) — Extracts the ID, then checks for cancel or modify keywords
-3. **Default** — Falls through to `chat` mode, where the LLM handles intent classification
-
----
-
-## LangGraph Pipelines
-
-### Search Pipeline (parallel fan-out/fan-in)
+Trip Agents runs as an **uploaded agent team** on the AI Agent Platform. Development source lives under `teams/trip_agents/`; at runtime the platform executes from `agent_platform/agents_store/<agent_id>/trip_agents/`.
 
 ```
-START → parse_query → ┬─ flight_search ─┐
-                       ├─ hotel_search  ─┤ → aggregate → END
-                       └─ car_search   ──┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser UI (trip_planner.html, trip_reservations.html)         │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ REST
+┌────────────────────────────▼────────────────────────────────────┐
+│  agent_platform/api/routes/trip.py                              │
+│  Threads · Messages · Suggestions · Seed · Memory · Reservations│
+└────────────────────────────┬────────────────────────────────────┘
+                             │ subprocess + AGENT_ARGS
+┌────────────────────────────▼────────────────────────────────────┐
+│  orchestrator/main.py  →  LangGraph (plan-and-execute)            │
+│       ↓                                                         │
+│  agent_flight · agent_hotel · agent_car  (vector search tools)  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │
+         ┌───────────────────┴───────────────────┐
+         ▼                                       ▼
+  Local MongoDB (agent_platform)          Atlas MongoDB (trip_data)
+  team_settings, platform metadata        inventory, chat, bookings
 ```
 
-- **`parse_query`** — Calls the LLM (using `shared/prompts/query_parser_system.txt`) with conversation history and long-term preferences to classify intent (`is_search: true/false`), extract structured filters, or generate a conversational reply
-- **`flight_search` / `hotel_search` / `car_search`** — Run **in parallel** via LangGraph fan-out. Each invokes its sub-agent graph (embed → search)
-- **`aggregate`** — Collects all results, generates an LLM-powered natural-language summary (using `shared/prompts/search_summary.txt`), saves to chat persistence, marks search-progress as done, and triggers background long-term memory extraction
+### Architecture: plan-and-execute orchestrator
 
-State is defined in `orchestrator/state.py` as `TripSearchState` (TypedDict with parameterized generics).
-
-### Reserve Pipeline
+The core pattern is **Plan-and-Execute** (not ReAct tool-calling). The LLM returns a structured JSON plan; Python executes tools deterministically; the LLM synthesizes results into a user-facing reply and optional **proposed bundle**.
 
 ```
-START → create_reservation → END
+START → plan → execute_tools → (replan loop, max 2) → synthesize → persist → END
+         │            │
+         └─ chat ─────┴─→ persist → END  (no search)
 ```
 
-Single-node graph using `TripReserveState`. Accepts partial selections (any combination of flight, hotel, car). Generates a human-readable reservation ID (`TRIP-YYYYMMDD-XXXX`) and stores it in Atlas.
+| Node | Responsibility |
+|------|----------------|
+| `plan` | LLM reads conversation + long-term prefs; returns `intent` (`chat` / `search` / `replan`) and optional `tool_calls` |
+| `execute_tools` | Runs planned tools sequentially; publishes partial results to `trip_search_progress` for UI streaming |
+| `replan_bump` | Increments retry counter when a search tool returns zero results |
+| `synthesize` | LLM picks best options and builds `proposed_bundle`; heuristic fallback if LLM fails |
+| `persist` | Writes assistant message to Atlas; triggers background preference extraction |
 
----
+**Design rationale:** JSON planning avoids paid provider-native tool-calling, keeps search execution predictable, and lets the LLM focus on *what* to search rather than *how* vector search works.
 
-## Sub-Agents (Search Pipelines)
+### Orchestrator modes
 
-Each sub-agent is a self-contained LangGraph with conditional error handling:
+Determined by `orchestrator/main.py` from `AGENT_ARGS.mode`:
+
+| Mode | Trigger | Behavior |
+|------|---------|----------|
+| `chat` | Default user message via API | Full plan-and-execute graph with thread persistence |
+| `search` | Stateless run via `run_config.json` | Same graph, no thread UI context |
+| `reserve` | UI sends `__RESERVE__{json}` | Single-node reserve graph → `trip_reservations` |
+| `cancel` | Message with reservation ID + cancel keywords | Direct delete + chat confirmation |
+| `modify` | Message with reservation ID + change keywords | Plan-and-execute in modify mode (single category) |
+| `update` | UI sends `__UPDATE__{json}` | Patches reservation document in Atlas |
+
+**API intent routing** (`trip.py` `_detect_message_mode`) runs *before* the agent subprocess:
+
+1. Internal prefixes `__RESERVE__` / `__UPDATE__`
+2. Regex `TRIP-\d{8}-[A-Z0-9]{4}` + keyword heuristics for cancel/modify
+3. Otherwise → `chat`
+
+### Sub-agents (search tools)
+
+Each category is a small LangGraph invoked as a tool from `orchestrator/tools.py`:
 
 ```
-embed_query ──(ok)──→ search_{category} → END
-     │
+embed_query ──(ok)──→ search_{flights|hotels|cars} → END
      └──(error)──→ END
 ```
 
-All three sub-agents share a single state definition (`shared/state.py:SearchAgentState`) re-exported under category-specific aliases for clarity.
-
-| Agent | Directory | Atlas Collection | State Alias |
-|-------|-----------|-----------------|-------------|
+| Agent | Directory | Atlas collection | State alias |
+|-------|-----------|------------------|-------------|
 | Flight | `agent_flight/` | `trip_flights` | `FlightSearchState` |
 | Hotel | `agent_hotel/` | `trip_hotels` | `HotelSearchState` |
 | Car | `agent_car/` | `trip_cars` | `CarSearchState` |
 
-### Node 1: `embed_query`
-Calls the Voyage AI REST API (`voyage-3-lite` model, 512 dimensions) to convert the natural-language query into a dense vector embedding. On failure, sets `status: "error"` and the conditional edge routes directly to `END`.
+All share `SearchAgentState` in `shared/state.py`.
 
-### Node 2: `search_{category}`
-Runs MongoDB Atlas `$vectorSearch` against the collection's `embedded_description` field with:
-- **Cosine similarity** ranking
-- **100 candidates**, returning **top 3**
-- Optional **pre-filters** (exact match via `$eq`, minimum via `$gte`) for hard constraints
+**Search pipeline:**
 
----
+1. **Embed** — Voyage AI `voyage-3-lite`, 512 dimensions (`shared/voyage.py`)
+2. **Vector search** — Atlas `$vectorSearch` on `embedded_description`, cosine similarity, 100 candidates → top 3 (`shared/atlas.py`)
+3. **Pre-filters** — Exact match on structured fields extracted from the plan (e.g. `destination_city`, `stars`)
 
-## Vector Search & Pre-Filtering
-
-Each Atlas collection has a `vector_index` (type `vectorSearch`) with filterable fields:
-
-| Collection | Filterable Fields |
+| Collection | Filterable fields |
 |------------|-------------------|
 | `trip_flights` | `origin_city`, `destination_city`, `travel_class` |
-| `trip_hotels` | `city`, `stars` |
-| `trip_cars` | `color`, `make`, `category`, `transmission`, `fuel_type`, `pickup_city` |
+| `trip_hotels` | `city`, `stars` (`$gte`) |
+| `trip_cars` | `pickup_city`, `make`, `category`, `color`, `transmission`, `fuel_type` |
 
-The LLM extracts filter values from the user's natural-language query. These are validated against allowed sets (e.g., `travel_class` must be one of `economy`, `premium economy`, `business`, `first`) before being applied as `$vectorSearch` pre-filters. This ensures exact-match constraints (e.g., "3-star hotel" never returns a 2-star).
+**Available tools** (defined in plan prompt):
 
-Filter construction (`shared/atlas.py`):
-- String fields → `{"field": {"$eq": value}}`
-- `stars` field → `{"field": {"$gte": value}}`
-- Multiple filters → `{"$and": [...]}`
+- `search_flights`, `search_hotels`, `search_cars`
+- `get_user_preferences`, `get_reservation`
 
----
+The plan prompt (`trip_planner_plan.txt`) instructs the LLM to call **only** the categories the user explicitly requested.
 
-## Prompt Management
+### Data layer: two MongoDB databases
 
-All LLM system prompts are stored as external text files in `shared/prompts/` and loaded via `shared/prompt_loader.py`:
+| Store | Connection | Database | Contents |
+|-------|------------|----------|----------|
+| **Local** | `MONGODB_URI` | `agent_platform` | `team_settings` (LLM provider, API keys, Atlas URI, Voyage key) |
+| **Atlas** | `ATLAS_MONGODB_URI` | `trip_data` | All trip domain data |
 
-| Prompt File | Used By | Purpose |
-|-------------|---------|---------|
-| `query_parser_system.txt` | `shared/query_parser.py` | Intent classification + filter extraction |
-| `memory_extraction.txt` | `shared/memory.py` | Long-term preference extraction from conversations |
-| `intent_classifier.txt` | `shared/intent.py` | Search vs. cancel intent detection |
-| `modify_parser.txt` | `orchestrator/main.py` | Category detection for reservation modifications |
-| `search_summary.txt` | `orchestrator/graph.py` | Natural-language summary of search results |
+#### Atlas collections (`trip_data`)
 
-The prompt loader supports `{{variable}}` placeholder substitution and caches loaded templates in memory.
+| Collection | Purpose |
+|------------|---------|
+| `trip_flights` | Flight inventory (1,000 seed docs) + vector index |
+| `trip_hotels` | Hotel inventory (1,000 seed docs) + vector index |
+| `trip_cars` | Car rental inventory (1,000 seed docs) + vector index |
+| `trip_reservations` | Confirmed bookings scoped by `agent_id` |
+| `trip_chatPersistence` | Chat threads and message history |
+| `trip_longMemory` | Long-term user preferences (`_id` = agent_id, max 30 facts) |
+| `trip_search_progress` | Ephemeral partial results for UI polling (`_id` = thread_id) |
+| `trip_seed_status` | Background seed job status (`_id` = agent_id) |
 
----
+Seed via **Settings → Load Sample Data** (`POST /api/trip/{agent_id}/seed`) or CLI `python seed_data.py`. Seeded when total docs ≥ 2,500.
 
-## Resilience & Error Handling
+### Memory
 
-### Retry Logic
-All external API calls use `tenacity` for automatic retry with exponential backoff:
-- **LLM calls** (`shared/llm.py`): 3 attempts, 1-10s backoff
-- **Voyage AI calls** (`shared/voyage.py`): 3 attempts, 1-10s backoff, retries on `RequestException` and `Timeout`
+| Type | Storage | Scope | Mechanism |
+|------|---------|-------|-----------|
+| **Short-term** | `trip_chatPersistence` | Per thread | Last 8 messages passed as `chat_history` to plan/synthesize |
+| **Long-term** | `trip_longMemory` | Per agent, cross-thread | Background LLM extraction after each turn (`memory_extraction.txt`); injected into plan prompt |
 
-### LLM Client Caching
-`get_llm()` returns a cached singleton per provider+model combination, avoiding redundant client initialization and connection setup on every call.
+### LLM integration
 
-### Timeouts
-- LLM providers: 30s timeout (configured via `LLM_TIMEOUT`)
-- Voyage AI: 60s timeout (configured via `VOYAGE_TIMEOUT`)
+`shared/llm.py` supports **Gemini, Claude, OpenAI, DeepSeek, Groq** — configured in the platform Settings tab (`team_settings`). Clients are cached per provider/model with tenacity retry (3×, exponential backoff, 30s timeout).
 
-### Conditional Edges
-Sub-agent graphs use conditional routing after the `embed_query` node — if embedding fails, the graph short-circuits to `END` with `status: "error"` instead of running a guaranteed-to-fail search.
+Active prompts:
 
-### Relaxed Retry (Modify Flow)
-When the modify search returns zero results with strict pre-filters (e.g., `make=BMW` + `pickup_city=Bucharest`), the system automatically retries with relaxed filters — removing location constraints (`pickup_city`, `city`, `origin_city`, `destination_city`) — to broaden the search before reporting no results. The chat message accurately reflects whether alternatives were found or not.
+| File | Used by |
+|------|---------|
+| `trip_planner_plan.txt` | `plan` node |
+| `trip_planner_synthesize.txt` | `synthesize` node |
+| `memory_extraction.txt` | Background preference learning |
 
-### Graceful Degradation
-- If one sub-agent fails during parallel search, the others still complete
-- LLM summary generation falls back to a template-based message on failure
-- Memory extraction failures are logged but never block the response pipeline
+Loaded via `shared/prompt_loader.py` with optional `{{variable}}` substitution.
 
----
+### Suggested prompts API
 
-## Memory Systems
+`GET /api/trip/{agent_id}/suggestions` builds three example prompts from **coherent Atlas samples**: a flight's `destination_city` is joined to a hotel in the same `city` and a car with matching `pickup_city` (aggregation with `$lookup`). Falls back to static prompts if Atlas is unavailable.
 
-### Short-Term Memory (Conversation Context)
+### API endpoints
 
-- **Storage**: `trip_chatPersistence` collection in Atlas (`trip_data` database)
-- **Scope**: Per-thread — each chat thread maintains its own message history
-- **Window**: Last **8 messages** are passed to the LLM as `chat_history`
-- **Persistence**: Survives application restarts (stored on Atlas)
-- **Purpose**: Enables context-aware follow-up conversations, intent classification, and natural replies that reference previous results
-
-**Flow**: On each message, the API fetches the thread's recent messages and passes them to the orchestrator. The query parser's LLM prompt includes this history for context-aware classification and response generation.
-
-### Long-Term Memory (User Preferences)
-
-- **Storage**: `trip_longMemory` collection in Atlas (`trip_data` database), keyed by `agent_id`
-- **Scope**: Cross-thread, cross-session — preferences persist across all conversations
-- **Capacity**: Capped at **30 preferences** (oldest pruned when exceeded)
-- **Extraction**: Runs in a **background thread** after each interaction — never blocks the search response
-- **Purpose**: Personalizes recommendations without the user repeating themselves
-
-**Learning (extraction)**: After every orchestrator interaction, a background thread calls the LLM (using `shared/prompts/memory_extraction.txt`) to analyze the conversation and extract new travel preferences. New facts are deduplicated (case-insensitive) against existing ones before saving.
-
-**Injection (recall)**: At the start of every query, stored preferences are loaded from Atlas and appended to the LLM system prompt. The LLM considers them when classifying intent, extracting filters, and generating search summaries.
-
-**Document structure**:
-```json
-{
-  "_id": "<agent_id>",
-  "preferences": [
-    { "fact": "Prefers 5-star hotels", "category": "hotel", "learned_at": "..." },
-    { "fact": "Avoids diesel cars", "category": "car", "learned_at": "..." }
-  ],
-  "updated_at": "..."
-}
-```
-
-**UI**: The "What I remember about you" collapsible section on the Trip Planner tab displays stored preferences with a "Clear all memories" button.
-
----
-
-## MongoDB Atlas Collections
-
-All trip domain data lives on Atlas in the `trip_data` database:
-
-| Collection | Purpose | Key Fields |
-|------------|---------|------------|
-| `trip_flights` | 1,000 seed flight documents | `airline`, `flight_number`, `origin_city`, `destination_city`, `travel_class`, `price_eur`, `text_description`, `embedded_description` (512-dim vector) |
-| `trip_hotels` | 1,000 seed hotel documents | `name`, `city`, `stars`, `amenities`, `price_per_night_eur`, `neighborhood`, `text_description`, `embedded_description` |
-| `trip_cars` | 1,000 seed car rental documents | `make`, `model`, `color`, `category`, `transmission`, `fuel_type`, `price_per_day_eur`, `pickup_city`, `text_description`, `embedded_description` |
-| `trip_reservations` | Confirmed bookings | `_id` (human-readable `TRIP-YYYYMMDD-XXXX`), `flight`, `hotel`, `car`, `trip_dates`, `total_cost_eur`, `status`, `agent_id` |
-| `trip_chatPersistence` | Chat thread history | `agent_id`, `title`, `messages[]` (role, content, timestamp, search_results, reservation, cancellation, modify_results), `created_at`, `updated_at` |
-| `trip_longMemory` | Learned user preferences | `_id` (agent_id), `preferences[]` (fact, category, learned_at), `updated_at` |
-| `trip_search_progress` | Ephemeral — tracks partial search results for progressive UI streaming | `_id` (thread_id), `flights`, `hotels`, `cars`, `done`, `started_at` |
-| `trip_seed_status` | Tracks data seeding progress and status | `_id` (agent_id), `status`, `detail`, `error`, `updated_at` |
-
----
-
-## LLM Integration
-
-The system supports multiple LLM providers via `shared/llm.py`, with cached singleton clients and automatic retry:
-
-| Provider | Models |
-|----------|--------|
-| **Anthropic Claude** | `claude-sonnet-4-20250514`, `claude-3-5-haiku-20241022` |
-| **Google Gemini** | `gemini-2.5-flash`, `gemini-2.5-pro`, `gemini-2.0-flash` |
-| **OpenAI** | `gpt-4o`, `gpt-4o-mini`, `o3-mini` |
-| **DeepSeek** | `deepseek-chat`, `deepseek-reasoner` |
-| **Groq** | `llama-3.3-70b-versatile`, `llama-3.1-8b-instant` |
-
-The active provider/model is configured in the platform's Settings tab and stored in `team_settings`. The LLM is used for:
-
-1. **Intent classification** — Search vs. conversational vs. follow-up
-2. **Filter extraction** — Structured constraints from natural language
-3. **Conversational replies** — Context-aware responses for non-search messages
-4. **Search summaries** — Natural-language overviews of search results
-5. **Preference extraction** — Long-term memory learning (background)
-6. **Modify category detection** — Determining which reservation component to replace
-
----
-
-## Custom UI Tabs
-
-### Trip Planner (`ui/tabs/trip_planner.html`)
-
-Split-panel layout:
-
-- **Left panel**: Search results with selectable cards (click to select, click again to deselect), collapsible detail descriptions, progressive streaming as each sub-agent completes, and reserve/update buttons
-- **Right panel**: Chat interface with thread management (max 5 threads), suggested prompts (generated from actual MongoDB data), LLM model badge, and the "What I remember about you" memory section
-
-### Reservations (`ui/tabs/trip_reservations.html`)
-
-Displays confirmed reservations with full flight/hotel/car details, human-readable reservation IDs, total cost, and a delete button.
-
----
-
-## Seed Data
-
-Sample data (1,000 documents per collection) is generated via `seed_data.py` or the **Load Sample Data** button on the Settings tab. Each document includes:
-
-- Realistic attributes (airlines, hotel chains, car brands, cities, prices)
-- Rich narrative `text_description` fields designed for semantic search quality
-- 512-dimensional Voyage AI embeddings in `embedded_description`
-- Atlas `vectorSearch` indexes with filterable fields
-
-The seeding process drops existing collections, re-inserts fresh data, computes embeddings via the Voyage AI API, and creates new vector search indexes.
-
----
-
-## API Endpoints
-
-All endpoints are prefixed with `/api/trip/{agent_id}`:
+Prefix: `/api/trip/{agent_id}` — implemented in `agent_platform/api/routes/trip.py`
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/threads` | List chat threads |
-| `POST` | `/threads` | Create a new thread |
+| `GET` | `/threads` | List chat threads (max 5) |
+| `POST` | `/threads` | Create thread |
 | `GET` | `/threads/{id}` | Get thread with messages |
-| `DELETE` | `/threads/{id}` | Delete a thread |
-| `POST` | `/threads/{id}/messages` | Send message (routes to appropriate mode) |
+| `DELETE` | `/threads/{id}` | Delete thread |
+| `POST` | `/threads/{id}/messages` | Send message → spawns agent run |
 | `GET` | `/threads/{id}/search-progress` | Poll partial search results |
-| `GET` | `/suggestions` | Get 3 suggested prompts from live data |
-| `GET` | `/reservations` | List confirmed reservations |
-| `DELETE` | `/reservations/{id}` | Delete a reservation |
-| `GET` | `/memory` | Get stored user preferences |
-| `DELETE` | `/memory` | Clear all preferences |
-| `GET` | `/seed/status` | Check if data is seeded |
-| `POST` | `/seed` | Trigger data seeding |
-| `GET` | `/seed/progress` | Poll seeding progress |
+| `GET` | `/suggestions` | Three sample prompts from live data |
+| `GET` | `/reservations` | List reservations |
+| `DELETE` | `/reservations/{id}` | Delete reservation |
+| `GET` | `/memory` | Get stored preferences |
+| `DELETE` | `/memory` | Clear preferences |
+| `GET` | `/seed/status` | Check if sample data exists |
+| `POST` | `/seed` | Start background seed |
+| `GET` | `/seed/progress` | Poll seed progress |
 
----
+Responses: `{ "success": bool, "data": ..., "error": string | null }`.
 
-## Setup
+### Custom UI tabs
 
-1. Set **VOYAGE_AI_API_KEY** and **ATLAS_MONGODB_URI** in the platform Settings tab
-2. Click **Load Sample Data** on the Settings tab (or run `python seed_data.py` manually)
-3. Configure your preferred LLM provider and model in Settings
-4. Navigate to the **Trip Planner** tab and start chatting
+`ui/tabs.json`:
 
-## Requirements
+```json
+{
+  "tabs": [
+    { "id": "trip_planner", "label": "Trip Planner" },
+    { "id": "trip_reservations", "label": "Reservations" }
+  ]
+}
+```
 
-See `requirements.txt`. Key dependencies:
+- **Trip Planner** — Split panel: search results (left), chat + suggestions + memory (right)
+- **Reservations** — List and delete confirmed bookings
 
-- **LangGraph** — Multi-agent orchestration with parallel execution
-- **PyMongo** — MongoDB Atlas driver
-- **Voyage AI** — Semantic embeddings (`voyage-3-lite`, 512 dimensions)
-- **Tenacity** — Retry with exponential backoff for external API calls
-- **Anthropic / Google GenAI / OpenAI / Groq** — LLM providers
-- **Certifi** — SSL certificate handling for Atlas connections
+### Configuration
 
-## File Structure
+**Per-agent (Settings tab → stored in local `team_settings`):**
+
+| Key | Purpose |
+|-----|---------|
+| `llm_provider`, `llm_model`, `api_keys` | LLM selection |
+| `ATLAS_MONGODB_URI` | Atlas connection for all trip data |
+| `VOYAGE_AI_API_KEY` | Embeddings for search and seeding |
+
+**Environment fallbacks** (`shared/config.py`): `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `MONGODB_URI`, `ATLAS_MONGODB_URI`, `VOYAGE_AI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL`
+
+**Runtime (set by platform executor):** `AGENT_ID`, `AGENT_ARGS` (JSON with `mode`, `thread_id`, `message`, `chat_history`, etc.)
+
+### Resilience & error handling
+
+- LLM and Voyage calls retry with exponential backoff (`tenacity`)
+- Sub-agents short-circuit on embedding failure (conditional edge to `END`)
+- Empty search results trigger replan (max 2) with relaxed filters
+- Synthesize falls back to heuristic bundle if LLM fails
+- Plan node returns a user-friendly error if the LLM is unavailable (e.g. API quota exceeded)
+- Memory extraction runs in a background thread — never blocks the response
+
+### Packaging & deployment
+
+```bash
+cd teams/trip_agents
+python3 build_zip.py
+# → trip_agents.zip ready for upload to the platform
+```
+
+`run_config.json` defines a stateless **Run** modal with a single `prompt` textarea for `mode=search` executions outside the Trip Planner UI.
+
+### File structure
 
 ```
 trip_agents/
 ├── orchestrator/
-│   ├── main.py          # Entry point — mode dispatch
-│   ├── graph.py          # LangGraph pipelines (search + reserve)
-│   └── state.py          # TypedDict state definitions (TripSearchState, TripReserveState)
-├── agent_flight/
-│   ├── agent.py          # Flight sub-agent graph (with conditional error edge)
-│   ├── state.py          # Re-exports SearchAgentState as FlightSearchState
-│   ├── main.py           # Standalone demo entry point
-│   ├── nodes/
-│   │   ├── embed_query.py
-│   │   └── search_flights.py
-│   └── memory/
-│       └── store.py      # Recent-search data accessor
-├── agent_hotel/          # (same structure as agent_flight)
-├── agent_car/            # (same structure as agent_flight)
+│   ├── main.py           # Mode dispatch entry point
+│   ├── graph.py          # Plan-and-execute + reserve LangGraphs
+│   ├── state.py          # TripAgentState, TripReserveState
+│   └── tools.py          # Tool registry, search progress publishing
+├── agent_flight/         # Flight search sub-agent
+├── agent_hotel/          # Hotel search sub-agent
+├── agent_car/            # Car search sub-agent
 ├── shared/
 │   ├── atlas.py          # Atlas client, vector_search, collection accessors
-│   ├── mongo.py          # Local MongoDB client, team_settings, LLM/key config
-│   ├── llm.py            # Multi-provider LLM wrapper (cached, retry, timeouts)
-│   ├── voyage.py         # Voyage AI embedding client (retry-enabled)
-│   ├── query_parser.py   # LLM-based intent + filter extraction
-│   ├── memory.py         # Long-term preference extraction and injection
-│   ├── intent.py         # Search vs. cancel intent classifier
-│   ├── state.py          # Shared SearchAgentState for all sub-agents
-│   ├── prompt_loader.py  # Centralized prompt template loader with caching
-│   ├── prompts/          # External LLM prompt templates
-│   │   ├── query_parser_system.txt
-│   │   ├── memory_extraction.txt
-│   │   ├── intent_classifier.txt
-│   │   ├── modify_parser.txt
-│   │   └── search_summary.txt
+│   ├── mongo.py          # Local MongoDB, team_settings, key loaders
+│   ├── llm.py            # Multi-provider LLM (cached, retry)
+│   ├── voyage.py         # Voyage AI embeddings
+│   ├── memory.py         # Long-term preference extract/inject
+│   ├── query_parser.py   # Filter validation helpers for tools
+│   ├── state.py          # Shared SearchAgentState
+│   ├── prompt_loader.py  # Prompt template loader
+│   ├── prompts/          # External LLM prompt files
 │   ├── config.py         # Environment variables and constants
-│   ├── logger.py         # Logging configuration
-│   └── utils.py          # Argument loading utilities
+│   ├── logger.py
+│   └── utils.py
 ├── ui/
-│   ├── tabs.json         # Tab definitions
+│   ├── tabs.json
 │   └── tabs/
-│       ├── trip_planner.html       # Chat + search UI
-│       └── trip_reservations.html  # Reservations UI
+│       ├── trip_planner.html
+│       └── trip_reservations.html
 ├── tests/
-│   └── test_pipeline.py  # Import, state, and utility smoke tests
-├── data/                 # Input/output data placeholders
-├── checkpoints/          # LangGraph checkpoint storage
-├── seed_data.py          # Atlas data seeding script
-├── build_zip.py          # Package builder for deployment
-├── run_config.json       # Stateless run configuration
+│   └── test_pipeline.py
+├── seed_data.py          # CLI Atlas seeding script
+├── build_zip.py
+├── run_config.json
 ├── requirements.txt
 └── README.md
 ```
+
+### Key dependencies
+
+- **LangGraph** — Orchestrator and sub-agent graphs
+- **PyMongo** — MongoDB Atlas driver
+- **Voyage AI** — Semantic embeddings (`voyage-3-lite`, 512-dim)
+- **Tenacity** — Retry with exponential backoff
+- **Anthropic / Google GenAI / OpenAI / Groq** — LLM provider SDKs
+- **Certifi** — TLS for Atlas connections
+
+### Quick start (developers)
+
+```bash
+# 1. Configure keys in the platform Settings tab for the trip agent:
+#    ATLAS_MONGODB_URI, VOYAGE_AI_API_KEY, LLM provider + API key
+
+# 2. Load sample data (Settings → Load Sample Data, or CLI):
+export ATLAS_MONGODB_URI="mongodb+srv://..."
+export VOYAGE_AI_API_KEY="..."
+python seed_data.py
+
+# 3. Open Agent Detail → Dashboard → Trip Planner and chat
+
+# 4. Package for upload:
+python build_zip.py
+```
+
+### Troubleshooting
+
+| Symptom | Likely cause |
+|---------|--------------|
+| "I'm having trouble processing that right now" | LLM API failure (quota, rate limit, invalid key). Check agent run logs under `agents_store/<id>/logs/`. Try another provider in Settings. |
+| Empty search results | Sample data not seeded, or vector indexes still building (~30s after seed) |
+| Suggestions show mismatched cities | Should not occur after coherent-trip sampling; verify `/suggestions` API |
+| Auth / connection errors | Missing or wrong `ATLAS_MONGODB_URI` or `VOYAGE_AI_API_KEY` in Settings |

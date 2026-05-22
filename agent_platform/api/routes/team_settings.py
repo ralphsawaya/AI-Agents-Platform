@@ -90,21 +90,6 @@ INTEGRATION_REGISTRY: dict[str, dict[str, str]] = {
         "description": "API key for Google Maps / Places API",
         "category": "Maps & Location",
     },
-    "BINANCE_API_KEY": {
-        "label": "Binance API Key",
-        "description": "Binance exchange API key",
-        "category": "Trading",
-    },
-    "BINANCE_API_SECRET": {
-        "label": "Binance API Secret",
-        "description": "Binance exchange API secret",
-        "category": "Trading",
-    },
-    "TRADINGVIEW_WEBHOOK_SECRET": {
-        "label": "TradingView Webhook Secret",
-        "description": "Secret for TradingView webhook authentication",
-        "category": "Trading",
-    },
     "VOYAGE_AI_API_KEY": {
         "label": "Voyage AI API Key",
         "description": "API key for Voyage AI embedding model",

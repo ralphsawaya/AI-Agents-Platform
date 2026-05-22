@@ -1,276 +1,360 @@
-"""Dual-mode orchestrator: Search pipeline and Reserve pipeline.
+"""Plan-and-Execute orchestrator + reserve pipeline.
 
-Search Pipeline (parallel fan-out/fan-in):
-    parse_query -> [flight_search, hotel_search, car_search] -> aggregate -> END
+Agent graph:
+    plan -> execute -> (replan | synthesize) -> END
 
-Reserve Pipeline:
+Reserve graph:
     create_reservation -> END
 """
 
+from __future__ import annotations
+
+import json
 import random
 import string
 import threading
 from datetime import datetime, timezone
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import END, START, StateGraph
 
-from orchestrator.state import TripSearchState, TripReserveState
-from agent_flight.agent import build_flight_graph
-from agent_hotel.agent import build_hotel_graph
-from agent_car.agent import build_car_graph
-from shared.atlas import get_reservations, get_chat_persistence, get_search_progress
-from shared.query_parser import parse_query_filters
-from shared.memory import learn_from_thread, load_preferences, format_preferences_for_prompt
-from shared.prompt_loader import load_prompt
+from orchestrator.state import TripAgentState, TripReserveState
+from orchestrator.tools import (
+    ToolContext,
+    execute_tool_calls,
+    mark_search_progress_done,
+    reset_search_progress,
+    set_planned_categories,
+)
+from shared.atlas import get_chat_persistence, get_reservations
 from shared.config import AGENT_ID
+from shared.llm import get_llm
+from shared.memory import format_preferences_for_prompt, learn_from_thread, load_preferences
+from shared.prompt_loader import load_prompt_raw
+from shared.query_parser import _extract_json
 from shared.logger import get_logger
 
 logger = get_logger("orchestrator.graph")
 
-def _publish_partial(thread_id: str, category: str, results: list):
-    """Write partial search results to Atlas so the UI can stream them."""
-    if not thread_id:
-        return
-    try:
-        get_search_progress().update_one(
-            {"_id": thread_id},
-            {"$set": {category: results, f"{category}_at": datetime.now(timezone.utc)}},
-            upsert=True,
-        )
-        logger.info("Published %d %s results for thread %s", len(results), category, thread_id)
-    except Exception as exc:
-        logger.warning("Failed to publish partial %s: %s", category, exc)
+MAX_REPLAN = 2
+_SEARCH_TOOLS = {"search_flights", "search_hotels", "search_cars"}
 
 
-# -- Search Pipeline Nodes ----------------------------------------------------
+def _build_history_prompt(query: str, chat_history: list, extra: str = "") -> str:
+    parts = []
+    if extra:
+        parts.append(extra)
+        parts.append("")
+    if chat_history:
+        parts.append("Conversation so far:")
+        for msg in chat_history[-8:]:
+            role = msg.get("role", "user").upper()
+            content = msg.get("content", "")
+            if len(content) > 400:
+                content = content[:400] + "..."
+            parts.append(f"  {role}: {content}")
+        parts.append("")
+    parts.append(f'Latest user message: "{query}"')
+    parts.append("")
+    parts.append("Return JSON only:")
+    return "\n".join(parts)
 
-def parse_query(state: dict) -> dict:
-    """Classify intent + extract structured filters from the query."""
+
+def _tool_context(state: dict) -> ToolContext:
+    return ToolContext(
+        query=state.get("query", ""),
+        thread_id=state.get("thread_id", ""),
+        reservation_id=state.get("reservation_id", ""),
+        reservation=state.get("reservation") or {},
+    )
+
+
+def _merge_search_results(existing: dict, new: dict) -> dict:
+    merged = {"flights": [], "hotels": [], "cars": []}
+    for key in merged:
+        prev = (existing or {}).get(key) or []
+        curr = (new or {}).get(key) or []
+        merged[key] = curr if curr else prev
+    return merged
+
+
+# -- Plan-and-Execute nodes ---------------------------------------------------
+
+def plan_node(state: dict) -> dict:
     query = state.get("query", "")
     chat_history = state.get("chat_history", [])
-    logger.info("Orchestrator: parsing query (%d chars, %d history msgs)", len(query), len(chat_history))
+    mode = state.get("mode", "chat")
+    replan_count = state.get("replan_count", 0)
+    tool_results = state.get("tool_results", [])
+
+    logger.info("Plan node — mode=%s replan=%d", mode, replan_count)
+
+    if state.get("thread_id") and replan_count == 0:
+        reset_search_progress(state["thread_id"])
 
     prefs = load_preferences(AGENT_ID)
     prefs_text = format_preferences_for_prompt(prefs)
+    system = load_prompt_raw("trip_planner_plan")
     if prefs_text:
-        logger.info("Injecting %d long-term preferences into query parser", len(prefs))
+        system = system + "\n\n" + prefs_text
 
-    parsed = parse_query_filters(query, chat_history=chat_history, user_prefs=prefs_text)
-    is_search = parsed.get("is_search", False)
+    extra = ""
+    if mode == "modify":
+        reservation = state.get("reservation") or {}
+        extra = (
+            f"MODIFY MODE: User wants to change one item in reservation "
+            f"{state.get('reservation_id', '')}.\n"
+            f"Current reservation summary: {json.dumps(reservation, default=str)[:800]}\n"
+            f"Search only the category the user wants to replace."
+        )
+    elif replan_count > 0 and tool_results:
+        extra = (
+            "REPLAN: Previous tool calls returned empty or poor results.\n"
+            f"Previous results: {json.dumps(tool_results, default=str)[:2000]}\n"
+            "Return intent 'replan' with adjusted tool_calls."
+        )
 
-    if not is_search:
-        reply = parsed.get("reply", "I'm a trip booking assistant. Tell me where you'd like to travel!")
-        logger.info("Not a search request — replying: %s", reply[:120])
+    try:
+        llm = get_llm()
+        raw = llm.invoke(_build_history_prompt(query, chat_history, extra), system=system)
+        plan = _extract_json(raw)
+    except Exception as exc:
+        logger.error("Plan LLM failed: %s", exc)
         return {
-            "is_search": False,
-            "nonsearch_reply": reply,
-            "flight_filters": {}, "hotel_filters": {}, "car_filters": {},
+            "intent": "chat",
+            "reply": "I'm having trouble processing that right now. Please try again.",
+            "plan": {},
+            "tool_results": [],
         }
 
-    logger.info("Search request — filters — flight: %s | hotel: %s | car: %s",
-                parsed.get("flight", {}), parsed.get("hotel", {}), parsed.get("car", {}))
+    if not isinstance(plan, dict):
+        plan = {}
 
-    thread_id = state.get("thread_id", "")
-    if thread_id:
-        try:
-            get_search_progress().update_one(
-                {"_id": thread_id},
-                {"$set": {"flights": None, "hotels": None, "cars": None, "done": False,
-                           "started_at": datetime.now(timezone.utc)}},
-                upsert=True,
-            )
-        except Exception:
-            pass
+    intent = plan.get("intent", "chat")
+    if intent not in ("chat", "search", "replan"):
+        intent = "search" if plan.get("tool_calls") else "chat"
+
+    reply = plan.get("reply") or ""
+    tool_calls = plan.get("tool_calls") or []
+    if not isinstance(tool_calls, list):
+        tool_calls = []
+
+    if intent in ("search", "replan") and not tool_calls:
+        intent = "chat"
+        reply = reply or "Could you tell me more about where you'd like to travel?"
+
+    logger.info("Plan intent=%s tools=%s", intent, [c.get("tool") for c in tool_calls])
 
     return {
-        "is_search": True,
-        "nonsearch_reply": "",
-        "flight_filters": parsed.get("flight", {}),
-        "hotel_filters": parsed.get("hotel", {}),
-        "car_filters": parsed.get("car", {}),
+        "plan": plan,
+        "intent": intent,
+        "reply": reply,
     }
 
 
-def run_flight_search(state: dict) -> dict:
-    if not state.get("is_search", False):
-        return {"flight_results": []}
-    logger.info("Orchestrator: running Flight Search agent")
-    result = build_flight_graph().invoke({
-        "query": state["query"], "query_embedding": [],
-        "filters": state.get("flight_filters", {}),
-        "results": [], "status": "pending",
-    })
-    results = result.get("results", [])
-    _publish_partial(state.get("thread_id", ""), "flights", results)
-    return {"flight_results": results}
+def execute_tools_node(state: dict) -> dict:
+    plan = state.get("plan") or {}
+    tool_calls = plan.get("tool_calls") or []
+    ctx = _tool_context(state)
+
+    set_planned_categories(state.get("thread_id", ""), tool_calls)
+    tool_results, search_results, tool_trace = execute_tool_calls(tool_calls, ctx)
+    merged = _merge_search_results(state.get("search_results") or {}, search_results)
+
+    prev_trace = list(state.get("tool_trace") or [])
+    return {
+        "tool_results": tool_results,
+        "search_results": merged,
+        "tool_trace": prev_trace + tool_trace,
+    }
 
 
-def run_hotel_search(state: dict) -> dict:
-    if not state.get("is_search", False):
-        return {"hotel_results": []}
-    logger.info("Orchestrator: running Hotel Search agent")
-    result = build_hotel_graph().invoke({
-        "query": state["query"], "query_embedding": [],
-        "filters": state.get("hotel_filters", {}),
-        "results": [], "status": "pending",
-    })
-    results = result.get("results", [])
-    _publish_partial(state.get("thread_id", ""), "hotels", results)
-    return {"hotel_results": results}
+def synthesize_node(state: dict) -> dict:
+    query = state.get("query", "")
+    search_results = state.get("search_results") or {"flights": [], "hotels": [], "cars": []}
+    tool_results = state.get("tool_results") or []
+    mode = state.get("mode", "chat")
 
+    prefs = load_preferences(AGENT_ID)
+    prefs_text = format_preferences_for_prompt(prefs)
 
-def run_car_search(state: dict) -> dict:
-    if not state.get("is_search", False):
-        return {"car_results": []}
-    logger.info("Orchestrator: running Car Rental Search agent")
-    result = build_car_graph().invoke({
-        "query": state["query"], "query_embedding": [],
-        "filters": state.get("car_filters", {}),
-        "results": [], "status": "pending",
-    })
-    results = result.get("results", [])
-    _publish_partial(state.get("thread_id", ""), "cars", results)
-    return {"car_results": results}
+    system = load_prompt_raw("trip_planner_synthesize")
+    if prefs_text:
+        system = system + "\n\nUser preferences:\n" + prefs_text
 
+    payload = {
+        "user_query": query,
+        "search_results": search_results,
+        "tool_results_summary": [
+            {"tool": tr.get("tool"), "count": tr.get("count", 0)}
+            for tr in tool_results
+        ],
+    }
 
-def aggregate_results(state: dict) -> dict:
-    """Save final combined message, mark progress as done, and learn preferences."""
+    if mode == "modify":
+        payload["modify_mode"] = True
+        payload["reservation_id"] = state.get("reservation_id", "")
+        payload["category"] = state.get("modify_category", "")
+
+    prompt = (
+        f"User request: {query}\n\n"
+        f"Data:\n{json.dumps(payload, default=str)[:6000]}\n\n"
+        "Return JSON only."
+    )
+
+    reply = ""
+    proposed_bundle = None
+    final_search_results = search_results
+
+    try:
+        llm = get_llm()
+        raw = llm.invoke(prompt, system=system)
+        parsed = _extract_json(raw)
+        if isinstance(parsed, dict) and parsed:
+            reply = parsed.get("content") or ""
+            proposed_bundle = parsed.get("proposed_bundle")
+    except Exception as exc:
+        logger.warning("Synthesize LLM failed: %s", exc)
+
+    if not proposed_bundle and any(final_search_results.get(k) for k in ("flights", "hotels", "cars")):
+        flights = final_search_results.get("flights") or []
+        hotels = final_search_results.get("hotels") or []
+        cars = final_search_results.get("cars") or []
+        total = 0.0
+        if flights:
+            total += flights[0].get("price_eur", 0)
+        if hotels:
+            total += hotels[0].get("price_per_night_eur", 0) * 7
+        if cars:
+            total += cars[0].get("price_per_day_eur", 0) * 7
+        proposed_bundle = {
+            "flight": flights[0] if flights else None,
+            "hotel": hotels[0] if hotels else None,
+            "car": cars[0] if cars else None,
+            "rationale": "Top matches from your search.",
+            "total_cost_eur": round(total, 2),
+        }
+
+    if not reply:
+        parts = []
+        if final_search_results.get("flights"):
+            parts.append(f"{len(final_search_results['flights'])} flights")
+        if final_search_results.get("hotels"):
+            parts.append(f"{len(final_search_results['hotels'])} hotels")
+        if final_search_results.get("cars"):
+            parts.append(f"{len(final_search_results['cars'])} cars")
+        reply = ("I found " + ", ".join(parts) + ". Review the options and confirm when ready.") if parts else \
+            "I couldn't find matching options. Try different criteria."
+
     thread_id = state.get("thread_id", "")
+    if thread_id:
+        mark_search_progress_done(thread_id)
 
-    if not state.get("is_search", False):
-        reply = state.get("nonsearch_reply", "I'm a trip booking assistant. Tell me where you'd like to travel!")
-        logger.info("Orchestrator: non-search — saving reply to thread")
-        if thread_id:
-            _save_text_reply(thread_id, reply)
-            _learn_from_thread_safe(thread_id, state)
+    return {
+        "reply": reply,
+        "search_results": final_search_results,
+        "proposed_bundle": proposed_bundle,
+    }
+
+
+def persist_and_learn(state: dict) -> dict:
+    """Save assistant message and trigger background memory extraction."""
+    thread_id = state.get("thread_id", "")
+    if not thread_id:
         return {}
 
-    flights = state.get("flight_results", [])
-    hotels = state.get("hotel_results", [])
-    cars = state.get("car_results", [])
+    intent = state.get("intent", "chat")
+    reply = state.get("reply", "")
+    search_results = state.get("search_results")
+    proposed_bundle = state.get("proposed_bundle")
+    tool_trace = state.get("tool_trace") or []
+    mode = state.get("mode", "chat")
 
-    logger.info("Orchestrator: aggregating — %d flights, %d hotels, %d cars",
-                len(flights), len(hotels), len(cars))
+    try:
+        col = get_chat_persistence()
+        now = datetime.now(timezone.utc)
+        msg: dict = {
+            "role": "assistant",
+            "content": reply,
+            "timestamp": now.isoformat(),
+        }
 
-    search_results = {"flights": flights, "hotels": hotels, "cars": cars}
-    if thread_id:
-        _save_assistant_message(thread_id, state.get("query", ""), search_results)
-        try:
-            get_search_progress().update_one(
-                {"_id": thread_id}, {"$set": {"done": True}},
-            )
-        except Exception:
-            pass
-        _learn_from_thread_safe(thread_id, state)
+        if intent in ("search", "replan") and search_results:
+            msg["search_results"] = search_results
+        if proposed_bundle and mode != "modify":
+            msg["proposed_bundle"] = proposed_bundle
+        if tool_trace:
+            msg["tool_trace"] = tool_trace
+        if mode == "modify" and state.get("reservation_id"):
+            cat = state.get("modify_category", "")
+            cat_map = {"flight": "flights", "hotel": "hotels", "car": "cars"}
+            results = (search_results or {}).get(cat_map.get(cat, ""), [])
+            if not results:
+                for c, key in cat_map.items():
+                    if (search_results or {}).get(key):
+                        cat = c
+                        results = search_results[key]
+                        break
+            if results:
+                msg["modify_results"] = {
+                    "reservation_id": state.get("reservation_id"),
+                    "category": cat,
+                    "results": results,
+                }
 
-    return {}
+        col.update_one(
+            {"_id": thread_id},
+            {"$push": {"messages": msg}, "$set": {"updated_at": now}},
+        )
+        logger.info("Saved assistant message to thread %s", thread_id)
+    except Exception as exc:
+        logger.error("Failed to persist message: %s", exc)
 
-
-def _learn_from_thread_safe(thread_id: str, state: dict):
-    """Extract and persist user preferences in a background thread."""
     chat_history = list(state.get("chat_history", []))
     query = state.get("query", "")
     if query:
         chat_history = chat_history + [{"role": "user", "content": query}]
-    if not chat_history:
-        return
 
     def _run():
         try:
             learn_from_thread(AGENT_ID, chat_history)
         except Exception as exc:
-            logger.warning("Long-term memory extraction failed (non-fatal): %s", exc)
+            logger.warning("Memory extraction failed: %s", exc)
 
-    threading.Thread(target=_run, daemon=True).start()
+    if chat_history:
+        threading.Thread(target=_run, daemon=True).start()
 
-
-def _save_text_reply(thread_id: str, text: str):
-    """Save a plain text assistant message (no search results)."""
-    try:
-        col = get_chat_persistence()
-        now = datetime.now(timezone.utc)
-        col.update_one(
-            {"_id": thread_id},
-            {"$push": {"messages": {
-                "role": "assistant", "content": text, "timestamp": now.isoformat(),
-            }}, "$set": {"updated_at": now}},
-        )
-        logger.info("Saved text reply to thread %s", thread_id)
-    except Exception as exc:
-        logger.error("Failed to save text reply: %s", exc)
+    return {}
 
 
-def _generate_search_summary(query: str, search_results: dict) -> str:
-    """Use the LLM to write a natural, conversational summary of search results."""
-    try:
-        from shared.llm import get_llm
-        llm = get_llm()
-
-        flights = search_results.get("flights", [])
-        hotels = search_results.get("hotels", [])
-        cars = search_results.get("cars", [])
-
-        brief = []
-        for f in flights[:3]:
-            brief.append(f"Flight: {f.get('airline','')} {f.get('flight_number','')}, "
-                         f"{f.get('origin_city','')}→{f.get('destination_city','')}, "
-                         f"{f.get('travel_class','')}, EUR{f.get('price_eur',0):.0f}")
-        for h in hotels[:3]:
-            brief.append(f"Hotel: {h.get('name','')}, {h.get('stars',0)}★, "
-                         f"{h.get('city','')}, EUR{h.get('price_per_night_eur',0):.0f}/night")
-        for c in cars[:3]:
-            brief.append(f"Car: {c.get('color','')} {c.get('make','')} {c.get('model','')}, "
-                         f"{c.get('category','')}, EUR{c.get('price_per_day_eur',0):.0f}/day")
-
-        prefs = load_preferences(AGENT_ID)
-        prefs_section = ""
-        if prefs:
-            prefs_section = ("\n\nUser's known preferences:\n"
-                + "\n".join(f"- {p.get('fact','')}" for p in prefs)
-                + "\nMention if any result matches a known preference.")
-
-        prompt = load_prompt(
-            "search_summary",
-            query=query,
-            results_brief="\n".join(brief),
-            prefs_section=prefs_section,
-        )
-        return llm.invoke(prompt).strip().strip('"')
-    except Exception as exc:
-        logger.warning("LLM summary failed, using fallback: %s", exc)
-        parts = []
-        if search_results.get("flights"):
-            parts.append(f"{len(search_results['flights'])} flights")
-        if search_results.get("hotels"):
-            parts.append(f"{len(search_results['hotels'])} hotels")
-        if search_results.get("cars"):
-            parts.append(f"{len(search_results['cars'])} car rentals")
-        return ("I found " + ", ".join(parts) + " for you.") if parts else \
-               "I couldn't find any results matching your criteria. Try adjusting your search."
+def route_after_plan(state: dict) -> str:
+    if state.get("intent") == "chat":
+        return "persist"
+    return "execute"
 
 
-def _save_assistant_message(thread_id: str, query: str, search_results: dict):
-    try:
-        col = get_chat_persistence()
-        now = datetime.now(timezone.utc)
-        content = _generate_search_summary(query, search_results)
+def route_after_execute(state: dict) -> str:
+    replan_count = state.get("replan_count", 0)
+    tool_results = state.get("tool_results") or []
 
-        col.update_one(
-            {"_id": thread_id},
-            {"$push": {"messages": {
-                "role": "assistant", "content": content,
-                "timestamp": now.isoformat(), "search_results": search_results,
-            }}, "$set": {"updated_at": now}},
-        )
-        logger.info("Saved assistant message to thread %s", thread_id)
-    except Exception as exc:
-        logger.error("Failed to save assistant message: %s", exc)
+    empty_search = any(
+        tr.get("tool") in _SEARCH_TOOLS and tr.get("count", 0) == 0
+        for tr in tool_results
+    )
+
+    if empty_search and replan_count < MAX_REPLAN:
+        logger.info("Empty search results — replanning (%d/%d)", replan_count + 1, MAX_REPLAN)
+        return "replan"
+
+    return "synthesize"
 
 
-# -- Reserve Pipeline Nodes ---------------------------------------------------
+def replan_bump(state: dict) -> dict:
+    return {"replan_count": state.get("replan_count", 0) + 1}
+
+
+# -- Reserve pipeline (unchanged) ---------------------------------------------
 
 def _generate_reservation_id(dt: datetime) -> str:
-    """Generate a human-readable reservation ID like TRIP-20260412-K7X3."""
     date_part = dt.strftime("%Y%m%d")
     suffix = "".join(random.choices(string.ascii_uppercase + string.digits, k=4))
     return f"TRIP-{date_part}-{suffix}"
@@ -306,9 +390,12 @@ def create_reservation(state: dict) -> dict:
     reservation = {
         "_id": res_id,
         "traveler_name": "John Doe",
-        "trip_dates": trip_dates, "total_cost_eur": round(total, 2),
-        "status": "confirmed", "thread_id": thread_id,
-        "agent_id": AGENT_ID, "created_at": now,
+        "trip_dates": trip_dates,
+        "total_cost_eur": round(total, 2),
+        "status": "confirmed",
+        "thread_id": thread_id,
+        "agent_id": AGENT_ID,
+        "created_at": now,
     }
     if flight:
         reservation["flight"] = flight
@@ -326,11 +413,11 @@ def create_reservation(state: dict) -> dict:
 
     parts = []
     if flight:
-        parts.append(f"flight ({flight.get('airline','')} {flight.get('flight_number','')})")
+        parts.append(f"flight ({flight.get('airline', '')} {flight.get('flight_number', '')})")
     if hotel:
-        parts.append(f"hotel ({hotel.get('name','')})")
+        parts.append(f"hotel ({hotel.get('name', '')})")
     if car:
-        parts.append(f"car ({car.get('make','')} {car.get('model','')})")
+        parts.append(f"car ({car.get('make', '')} {car.get('model', '')})")
     booked_text = ", ".join(parts)
 
     if thread_id:
@@ -339,8 +426,12 @@ def create_reservation(state: dict) -> dict:
                 {"_id": thread_id},
                 {"$push": {"messages": {
                     "role": "assistant",
-                    "content": f"Your reservation has been confirmed! Booked: {booked_text}. Total cost: EUR{total:.2f}.",
-                    "timestamp": now.isoformat(), "reservation": reservation,
+                    "content": (
+                        f"Your reservation has been confirmed! Booked: {booked_text}. "
+                        f"Total cost: EUR{total:.2f}."
+                    ),
+                    "timestamp": now.isoformat(),
+                    "reservation": reservation,
                 }}, "$set": {"updated_at": now}},
             )
         except Exception as exc:
@@ -349,32 +440,69 @@ def create_reservation(state: dict) -> dict:
     return {"reservation": reservation, "status": "complete"}
 
 
-# -- Graph Builders -----------------------------------------------------------
+# -- Graph builders -----------------------------------------------------------
 
-def build_search_graph():
-    """Parallel fan-out: START -> parse_query -> [flight, hotel, car] -> aggregate -> END"""
-    graph = StateGraph(TripSearchState)
-    graph.add_node("parse_query", parse_query)
-    graph.add_node("flight_search", run_flight_search)
-    graph.add_node("hotel_search", run_hotel_search)
-    graph.add_node("car_search", run_car_search)
-    graph.add_node("aggregate", aggregate_results)
+def build_agent_graph():
+    """Plan -> execute -> (replan loop) -> synthesize -> persist."""
+    graph = StateGraph(TripAgentState)
+    graph.add_node("plan", plan_node)
+    graph.add_node("execute", execute_tools_node)
+    graph.add_node("replan_bump", replan_bump)
+    graph.add_node("synthesize", synthesize_node)
+    graph.add_node("persist", persist_and_learn)
 
-    graph.add_edge(START, "parse_query")
-    graph.add_edge("parse_query", "flight_search")
-    graph.add_edge("parse_query", "hotel_search")
-    graph.add_edge("parse_query", "car_search")
-    graph.add_edge("flight_search", "aggregate")
-    graph.add_edge("hotel_search", "aggregate")
-    graph.add_edge("car_search", "aggregate")
-    graph.add_edge("aggregate", END)
+    graph.add_edge(START, "plan")
+    graph.add_conditional_edges("plan", route_after_plan, {
+        "execute": "execute",
+        "persist": "persist",
+    })
+    graph.add_conditional_edges("execute", route_after_execute, {
+        "replan": "replan_bump",
+        "synthesize": "synthesize",
+    })
+    graph.add_edge("replan_bump", "plan")
+    graph.add_edge("synthesize", "persist")
+    graph.add_edge("persist", END)
     return graph.compile()
 
 
+def build_search_graph():
+    """Backward-compatible alias for the agent graph."""
+    return build_agent_graph()
+
+
 def build_reserve_graph():
-    """create_reservation -> END"""
     graph = StateGraph(TripReserveState)
     graph.add_node("create_reservation", create_reservation)
     graph.set_entry_point("create_reservation")
     graph.add_edge("create_reservation", END)
     return graph.compile()
+
+
+def _initial_agent_state(
+    query: str,
+    thread_id: str = "",
+    chat_history: list | None = None,
+    mode: str = "chat",
+    reservation_id: str = "",
+    reservation: dict | None = None,
+    modify_category: str = "",
+) -> dict:
+    return {
+        "query": query,
+        "thread_id": thread_id,
+        "chat_history": chat_history or [],
+        "mode": mode,
+        "reservation_id": reservation_id,
+        "reservation": reservation or {},
+        "plan": {},
+        "intent": "",
+        "reply": "",
+        "tool_results": [],
+        "search_results": {"flights": [], "hotels": [], "cars": []},
+        "proposed_bundle": None,
+        "tool_trace": [],
+        "replan_count": 0,
+        "modify_category": modify_category,
+        "error": "",
+    }

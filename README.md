@@ -25,9 +25,8 @@ AI-Agents-Platform/
 │   ├── ui/                  # Jinja2 templates, CSS, JS
 │   └── agents_store/        # Extracted agent packages (auto-managed)
 └── teams/                   # Your agent team workspaces
-    ├── sample_agents/       # Example team (my_first_agents)
-    ├── team_ab_agents/      # Two-agent pipeline (Summarise + Title)
-    └── trading_agents/      # Autonomous BTC/USDT trading system (4 agents)
+    ├── trip_agents/         # Trip planning multi-agent team
+    └── strategygpt_agents/  # Lead sourcing, qualification, and voice outreach
 ```
 
 Each folder inside `teams/` is a **team workspace** — a place to develop and package an agent team. When ready, run `build_zip.py` inside the workspace to produce a `.zip` ready for upload.
@@ -135,8 +134,8 @@ Agent teams can ship custom UI tabs that appear on the agent detail page under a
 ```json
 {
   "tabs": [
-    { "id": "trading",  "label": "Trading" },
-    { "id": "trades",   "label": "Trades" }
+    { "id": "trip_planner",  "label": "Trip Planner" },
+    { "id": "reservations",  "label": "Reservations" }
   ]
 }
 ```
@@ -185,9 +184,9 @@ Any `README.md` in the zip root is automatically read and rendered as the **Desc
 Each team workspace under `teams/` includes a `build_zip.py` script:
 
 ```bash
-cd teams/team_ab_agents
+cd teams/trip_agents
 python3 build_zip.py
-# → creates team_ab.zip ready for upload
+# → creates trip_agents.zip ready for upload
 ```
 
 ## Development Workflow
@@ -216,7 +215,7 @@ If you're not using Cursor, you'll need to either re-zip and re-upload, or manua
                       │ HTTP / WebSocket
 ┌─────────────────────▼────────────────────────────────┐
 │                  FastAPI Application                 │
-│  REST Routes │ Webhook API │ Trading API │ WS │ SSR  │
+│  REST Routes │ WebSocket │ SSR                       │
 └──────┬──────────────┬────────────────────────────────┘
        │              │
 ┌──────▼──────┐ ┌─────▼────────────────────────────────┐
@@ -250,8 +249,8 @@ Tabbed interface with standard tabs for all teams, plus optional custom tabs per
 - **Files** — read-only source file browser with syntax highlighting (excludes `.venv`, caches, and build artifacts)
 - **Runs** — paginated run history (15 per page, last 100 runs) with inline log viewer and live WebSocket tail
 - **Schedules** — create/edit/delete cron, interval, or one-time schedules
-- **Settings** — LLM provider/model selection and API key management for the team, persisted to MongoDB (`team_settings` collection). Supported providers: Google Gemini (default), Anthropic Claude, DeepSeek, Groq, and OpenAI. API keys can be toggled between masked and visible using the eye icon. For trading teams, also includes the trading kill switch, risk defaults, and indicator period configuration. All teams share the same LLM selection UI; each team's settings are stored independently by agent ID. This tab is built-in and appears automatically for every agent team — no configuration needed.
-- **Dashboard** — parent tab that groups all custom team-specific tabs as subsections. When clicked, a secondary navigation bar appears below the main tabs showing the team's custom tabs (e.g. the trading team's Dashboard contains Trading, Trades, Signals, and Strategy sub-tabs). The Dashboard tab and its sub-tab bar share a distinct tinted background with an accent border to visually convey the parent–child hierarchy. Custom tabs are loaded as plugins from `ui/tabs/` in the team package.
+- **Settings** — LLM provider/model selection and API key management for the team, persisted to MongoDB (`team_settings` collection). Supported providers: Google Gemini (default), Anthropic Claude, DeepSeek, Groq, and OpenAI. API keys can be toggled between masked and visible using the eye icon. All teams share the same LLM selection UI; each team's settings are stored independently by agent ID. This tab is built-in and appears automatically for every agent team — no configuration needed.
+- **Dashboard** — parent tab that groups all custom team-specific tabs as subsections. When clicked, a secondary navigation bar appears below the main tabs showing the team's custom tabs (e.g. the trip team's Dashboard contains Trip Planner and related sub-tabs). The Dashboard tab and its sub-tab bar share a distinct tinted background with an accent border to visually convey the parent–child hierarchy. Custom tabs are loaded as plugins from `ui/tabs/` in the team package.
 - **Danger Zone** — rebuild virtual environment (re-install dependencies) and permanent deletion with confirmation
 
 ### Monitor
@@ -282,12 +281,6 @@ All settings are in `agent_platform/config.py` and overridable via `.env`:
 | `GEMINI_API_KEY` | *(empty)* | For agent teams using Google Gemini (default LLM) |
 | `GROQ_API_KEY` | *(empty)* | Forwarded to all agent subprocesses |
 | `ANTHROPIC_API_KEY` | *(empty)* | For agent teams using Claude |
-| `BINANCE_API_KEY` | *(empty)* | For the trading agents team |
-| `BINANCE_API_SECRET` | *(empty)* | For the trading agents team |
-| `TRADINGVIEW_WEBHOOK_SECRET` | *(empty)* | Webhook authentication secret |
-| `TRADING_ENABLED` | `true` | Global trading kill switch (also persisted to MongoDB via Trading tab settings) |
-| `TRADING_DRY_RUN` | `true` | Simulate trades without real orders |
-| `TRADING_MAX_DAILY_TRADES` | `50` | Daily trade limit |
 
 ## Technical Stack
 

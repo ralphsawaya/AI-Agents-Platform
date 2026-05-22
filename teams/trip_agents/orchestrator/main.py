@@ -1,11 +1,11 @@
 """Orchestrator entry point for the trip agent team.
 
 Supports multiple modes via AGENT_ARGS:
-  - mode=search (or prompt field): Parallel search pipeline
-  - mode=chat: Search pipeline with chat thread persistence
+  - mode=search (or prompt field): Plan-and-Execute agent pipeline
+  - mode=chat: Agent pipeline with chat thread persistence
   - mode=reserve: Creates a reservation from selected options
   - mode=cancel: Cancels (deletes) an existing reservation by ID
-  - mode=modify: Targeted search to replace one item in a reservation
+  - mode=modify: Targeted search via agent to replace one reservation item
   - mode=update: Applies a selected replacement to an existing reservation
 """
 
@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from shared.logger import get_logger
 from shared.utils import load_args
-from orchestrator.graph import build_search_graph, build_reserve_graph
+from orchestrator.graph import build_agent_graph, build_reserve_graph, _initial_agent_state
 
 logger = get_logger("orchestrator")
 
@@ -57,28 +57,30 @@ def run_search(args: dict):
         return None
 
     logger.info("Query: %s", query[:200])
-    result = build_search_graph().invoke({
-        "query": query, "thread_id": thread_id,
-        "chat_history": chat_history,
-        "is_search": True, "nonsearch_reply": "",
-        "flight_filters": {}, "hotel_filters": {}, "car_filters": {},
-        "flight_results": [], "hotel_results": [], "car_results": [],
-        "error": "",
-    })
+    result = build_agent_graph().invoke(_initial_agent_state(
+        query=query,
+        thread_id=thread_id,
+        chat_history=chat_history,
+        mode="chat" if args.get("mode") == "chat" else "search",
+    ))
 
-    if not result.get("is_search", False):
-        reply = result.get("nonsearch_reply", "")
-        logger.info("Non-search reply: %s", reply[:200])
+    intent = result.get("intent", "chat")
+    reply = result.get("reply", "")
+    search_results = result.get("search_results") or {}
+    proposed_bundle = result.get("proposed_bundle")
+
+    if intent == "chat":
+        logger.info("Chat reply: %s", reply[:200])
         output = {"status": "complete", "reply": reply, "thread_id": thread_id}
         print(f"\n__RESULT_JSON__:{json.dumps(output)}")
         return result
 
-    flights = result.get("flight_results", [])
-    hotels = result.get("hotel_results", [])
-    cars = result.get("car_results", [])
+    flights = search_results.get("flights", [])
+    hotels = search_results.get("hotels", [])
+    cars = search_results.get("cars", [])
 
     logger.info("=" * 60)
-    logger.info("Search complete! Flights: %d | Hotels: %d | Cars: %d",
+    logger.info("Agent complete! Flights: %d | Hotels: %d | Cars: %d",
                 len(flights), len(hotels), len(cars))
     logger.info("=" * 60)
 
@@ -93,9 +95,16 @@ def run_search(args: dict):
     for i, c in enumerate(cars):
         print(f"  {i+1}. {c.get('color','')} {c.get('make','')} {c.get('model','')} — EUR{c.get('price_per_day_eur',0)}/day")
 
-    output = {"status": "complete", "flights": flights, "hotels": hotels,
-              "cars": cars, "thread_id": thread_id}
-    print(f"\n__RESULT_JSON__:{json.dumps(output)}")
+    output = {
+        "status": "complete",
+        "flights": flights,
+        "hotels": hotels,
+        "cars": cars,
+        "thread_id": thread_id,
+        "proposed_bundle": proposed_bundle,
+        "reply": reply,
+    }
+    print(f"\n__RESULT_JSON__:{json.dumps(output, default=str)}")
     return result
 
 
@@ -210,21 +219,8 @@ def _save_cancel_message(thread_id: str, reservation_id: str, success: bool, det
 
 
 def run_modify(args: dict):
-    """Search for replacement options for one category in an existing reservation.
-
-    Uses the same sub-agent graphs as the main search pipeline instead of
-    duplicating vector-search logic.
-    """
-    from datetime import datetime, timezone
+    """Run Plan-and-Execute agent in modify mode for one reservation category."""
     from shared.atlas import get_reservations
-    from shared.llm import get_llm
-    from shared.prompt_loader import load_prompt
-    from shared.query_parser import _clean_flight_filters, _clean_hotel_filters, _clean_car_filters
-    from shared.atlas import get_search_progress
-    from agent_flight.agent import build_flight_graph
-    from agent_hotel.agent import build_hotel_graph
-    from agent_car.agent import build_car_graph
-    import re as _re
 
     reservation_id = args.get("reservation_id", "")
     thread_id = args.get("thread_id", "")
@@ -236,135 +232,41 @@ def run_modify(args: dict):
         print(f"\n__RESULT_JSON__:{json.dumps(output)}")
         return None
 
-    res_col = get_reservations()
-    reservation = res_col.find_one({"_id": reservation_id})
+    reservation = get_reservations().find_one({"_id": reservation_id})
     if not reservation:
         _save_chat_msg(thread_id, f"Reservation {reservation_id} was not found.")
         output = {"status": "not_found", "reservation_id": reservation_id}
         print(f"\n__RESULT_JSON__:{json.dumps(output)}")
         return None
 
-    category = ""
-    raw_filters = {}
+    chat_history = args.get("chat_history", [])
+    result = build_agent_graph().invoke(_initial_agent_state(
+        query=message,
+        thread_id=thread_id,
+        chat_history=chat_history,
+        mode="modify",
+        reservation_id=reservation_id,
+        reservation=reservation,
+    ))
 
-    try:
-        llm = get_llm()
-        prompt = load_prompt(
-            "modify_parser",
-            reservation_id=reservation_id,
-            message=message,
-            flight_summary=json.dumps(reservation.get("flight", {}), default=str)[:200],
-            hotel_summary=json.dumps(reservation.get("hotel", {}), default=str)[:200],
-            car_summary=json.dumps(reservation.get("car", {}), default=str)[:200],
-        )
-        raw = llm.invoke(prompt)
-        match = _re.search(r'\{.*\}', raw, _re.DOTALL)
-        parsed = json.loads(match.group()) if match else {}
-        category = parsed.get("category", "").lower()
-        raw_filters = parsed.get("filters", {})
-    except Exception as exc:
-        logger.warning("LLM modify parse failed: %s", exc)
+    search_results = result.get("search_results") or {}
+    modify_category = ""
+    for cat, key in (("flight", "flights"), ("hotel", "hotels"), ("car", "cars")):
+        if search_results.get(key):
+            modify_category = cat
+            break
 
-    if category not in ("flight", "hotel", "car"):
-        _save_chat_msg(thread_id,
-            "I couldn't determine which part of your reservation you'd like to change. "
-            "Please specify if you want to change the flight, hotel, or car.")
-        output = {"status": "error", "error": "Could not determine category"}
-        print(f"\n__RESULT_JSON__:{json.dumps(output)}")
-        return None
-
-    if category == "flight":
-        filters = _clean_flight_filters(raw_filters)
-        if not filters.get("origin_city") and reservation.get("flight", {}).get("origin_city"):
-            filters["origin_city"] = reservation["flight"]["origin_city"]
-        if not filters.get("destination_city") and reservation.get("flight", {}).get("destination_city"):
-            filters["destination_city"] = reservation["flight"]["destination_city"]
-    elif category == "hotel":
-        filters = _clean_hotel_filters(raw_filters)
-        if not filters.get("city") and reservation.get("hotel", {}).get("city"):
-            filters["city"] = reservation["hotel"]["city"]
-    else:
-        filters = _clean_car_filters(raw_filters)
-        if not filters.get("pickup_city") and reservation.get("car", {}).get("pickup_city"):
-            filters["pickup_city"] = reservation["car"]["pickup_city"]
-
-    logger.info("Modify search — category: %s, filters: %s", category, filters)
-
-    if thread_id:
-        try:
-            get_search_progress().update_one(
-                {"_id": thread_id},
-                {"$set": {"flights": None, "hotels": None, "cars": None, "done": False,
-                           "started_at": datetime.now(timezone.utc)}},
-                upsert=True,
-            )
-        except Exception:
-            pass
-
-    graph_builders = {
-        "flight": build_flight_graph,
-        "hotel": build_hotel_graph,
-        "car": build_car_graph,
-    }
-
-    try:
-        graph = graph_builders[category]()
-        result = graph.invoke({
-            "query": message, "query_embedding": [],
-            "filters": filters,
-            "results": [], "status": "pending",
-        })
-        results = result.get("results", [])
-        logger.info("Modify search found %d %s results (filters: %s)", len(results), category, filters)
-
-        if not results and filters:
-            logger.info("No results with strict filters, retrying with relaxed filters")
-            relaxed = {k: v for k, v in filters.items()
-                       if k not in ("pickup_city", "origin_city", "destination_city", "city")}
-            if relaxed != filters:
-                result = graph.invoke({
-                    "query": message, "query_embedding": [],
-                    "filters": relaxed,
-                    "results": [], "status": "pending",
-                })
-                results = result.get("results", [])
-                logger.info("Relaxed search found %d %s results", len(results), category)
-    except Exception as exc:
-        logger.error("Modify search failed: %s", exc)
-        results = []
-
-    progress_key = {"flight": "flights", "hotel": "hotels", "car": "cars"}[category]
-    if thread_id:
-        try:
-            get_search_progress().update_one(
-                {"_id": thread_id},
-                {"$set": {progress_key: results, "done": True}},
-            )
-        except Exception:
-            pass
-
-    current_item = reservation.get(category, {})
-    current_desc = _item_desc(category, current_item)
-
-    if results:
-        summary = (f"Here are some alternative {category} options to replace "
-                   f"**{current_desc}** in reservation {reservation_id}. "
-                   f"Select one and click 'Update Reservation' to apply the change.")
-    else:
-        summary = (f"I searched for alternative {category} options to replace "
-                   f"**{current_desc}** in reservation {reservation_id}, "
-                   f"but couldn't find any matches. Try describing what you're looking for "
-                   f"differently, or with fewer constraints.")
-    _save_chat_msg(thread_id, summary, modify_results={
+    output = {
+        "status": "complete",
+        "mode": "modify",
         "reservation_id": reservation_id,
-        "category": category,
-        "results": results,
-    })
-
-    output = {"status": "complete", "mode": "modify", "reservation_id": reservation_id,
-              "category": category, "results": results, "thread_id": thread_id}
+        "category": modify_category,
+        "results": search_results,
+        "thread_id": thread_id,
+        "reply": result.get("reply", ""),
+    }
     print(f"\n__RESULT_JSON__:{json.dumps(output, default=str)}")
-    return output
+    return result
 
 
 def run_update(args: dict):

@@ -55,6 +55,19 @@
     .btn-reserve:hover { background: #94e2d5; }
     .btn-reserve:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    /* Agent-proposed bundle */
+    .bundle-card { background: #27273a; border: 2px solid #89b4fa; border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+    .bundle-card h3 { margin: 0 0 8px 0; font-size: 15px; color: #89b4fa; }
+    .bundle-card .bundle-rationale { font-size: 12px; color: #9399b2; margin-bottom: 12px; line-height: 1.5; }
+    .bundle-item { background: #313244; border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; font-size: 12px; color: #cdd6f4; }
+    .bundle-item .label { font-size: 11px; color: #89b4fa; text-transform: uppercase; letter-spacing: 0.04em; }
+    .bundle-total { font-size: 16px; font-weight: 700; color: #a6e3a1; margin: 12px 0; }
+    .bundle-actions { display: flex; gap: 8px; margin-top: 12px; }
+    .btn-bundle-confirm { flex: 1; padding: 12px; border: none; border-radius: 8px; background: #a6e3a1; color: #1e1e2e; font-weight: 700; cursor: pointer; }
+    .btn-bundle-alt { flex: 1; padding: 12px; border: 1px solid #585b70; border-radius: 8px; background: transparent; color: #cdd6f4; font-weight: 600; cursor: pointer; }
+    .btn-bundle-confirm:hover { background: #94e2d5; }
+    .btn-bundle-alt:hover { border-color: #89b4fa; color: #89b4fa; }
+
     .reservation-banner { background: #a6e3a1; color: #1e1e2e; padding: 14px 20px; border-radius: 8px; font-weight: 600; text-align: center; margin-bottom: 16px; }
     .cancellation-banner { background: #f38ba8; color: #1e1e2e; padding: 14px 20px; border-radius: 8px; font-weight: 600; text-align: center; margin-bottom: 16px; }
     .update-banner { background: #89b4fa; color: #1e1e2e; padding: 14px 20px; border-radius: 8px; font-weight: 600; text-align: center; margin-bottom: 16px; }
@@ -114,6 +127,11 @@
         <div class="chat-messages" id="chatMessages">
             <div class="empty-state">Type a message below and press Send — a thread will be created automatically.</div>
         </div>
+        <div class="chat-input-area">
+            <input id="chatInput" type="text" placeholder="Describe your ideal trip..."
+                   onkeydown="if(event.key==='Enter')sendMessage()" />
+            <button id="sendBtn" onclick="sendMessage()">Send</button>
+        </div>
         <div class="suggestions-box" id="suggestionsBox">
             <div class="suggestions-header">
                 <span class="label">💡 Try a prompt</span>
@@ -127,11 +145,6 @@
                 <span class="toggle" id="memoryToggle">▸</span>
             </div>
             <div class="memory-items" id="memoryItems"></div>
-        </div>
-        <div class="chat-input-area">
-            <input id="chatInput" type="text" placeholder="Describe your ideal trip..."
-                   onkeydown="if(event.key==='Enter')sendMessage()" />
-            <button id="sendBtn" onclick="sendMessage()">Send</button>
         </div>
     </div>
 </div>
@@ -210,21 +223,35 @@
 
     let _partialRendered = { flights: false, hotels: false, cars: false };
     let _searchSpinnersShown = false;
+    let _activeSearchCategories = [];
 
-    function _showSearchSpinners() {
-        if (_searchSpinnersShown) return;
-        _searchSpinnersShown = true;
+    const _CATEGORY_LABELS = { flights: 'flights', hotels: 'hotels', cars: 'cars' };
+
+    function _showSearchSpinners(categories) {
+        const cats = (categories && categories.length) ? categories : _activeSearchCategories;
+        if (!cats.length) return;
+
         const panel = document.getElementById('resultsPanel');
-        panel.innerHTML = '<div class="search-progress-bar">'
-            + '<div class="sp-item" id="sp-flights"><span class="spinner"></span> Searching flights...</div>'
-            + '<div class="sp-item" id="sp-hotels"><span class="spinner"></span> Searching hotels...</div>'
-            + '<div class="sp-item" id="sp-cars"><span class="spinner"></span> Searching cars...</div>'
-            + '</div>';
+        const sameCats = cats.length === _activeSearchCategories.length
+            && cats.every((c, i) => c === _activeSearchCategories[i]);
+        if (_searchSpinnersShown && sameCats) return;
+
+        _searchSpinnersShown = true;
+        _activeSearchCategories = cats.slice();
+
+        let html = '<div class="search-progress-bar">';
+        for (const cat of _activeSearchCategories) {
+            const label = _CATEGORY_LABELS[cat] || cat;
+            html += `<div class="sp-item" id="sp-${cat}"><span class="spinner"></span> Searching ${label}...</div>`;
+        }
+        html += '</div>';
+        panel.innerHTML = html;
     }
 
     async function pollRun(runId) {
         _partialRendered = { flights: false, hotels: false, cars: false };
         _searchSpinnersShown = false;
+        _activeSearchCategories = [];
         const maxAttempts = 120;
         for (let i = 0; i < maxAttempts; i++) {
             await sleep(500);
@@ -232,7 +259,9 @@
                 if (activeThread) {
                     const prog = await API.get(`${BASE}/threads/${activeThread}/search-progress`);
                     if (prog.success && prog.data && prog.data.active) {
-                        _showSearchSpinners();
+                        if (prog.data.categories && prog.data.categories.length) {
+                            _showSearchSpinners(prog.data.categories);
+                        }
                         _renderPartialResults(prog.data);
                         if (prog.data.done) {
                             await reloadThread();
@@ -277,11 +306,14 @@
             _appendResultSection(panel, 'cars', prog.cars);
         }
 
-        if (_partialRendered.flights && _partialRendered.hotels && _partialRendered.cars) {
+        const planned = prog.categories || _activeSearchCategories || [];
+        const allPlannedDone = planned.length > 0 && planned.every(cat => _partialRendered[cat]);
+        if (prog.done || allPlannedDone) {
             const bar = panel.querySelector('.search-progress-bar');
             if (bar) bar.remove();
-            if (!panel.querySelector('.btn-reserve')) {
+            if (!panel.querySelector('.btn-reserve') && !panel.querySelector('.bundle-card')) {
                 panel.innerHTML += '<button class="btn-reserve" id="reserveBtn" onclick="confirmReservation()" disabled>Select at least one option to reserve</button>';
+                _updateReserveBtn();
             }
         }
     }
@@ -381,7 +413,14 @@
             appendChat(m.role, m.content, false);
             if (m.search_results) {
                 latestResults = m.search_results;
-                renderResults(m.search_results);
+                if (m.proposed_bundle) {
+                    renderProposedBundle(m.proposed_bundle, m.search_results);
+                } else {
+                    renderResults(m.search_results);
+                }
+            }
+            if (m.proposed_bundle && !m.search_results) {
+                renderProposedBundle(m.proposed_bundle, {});
             }
             if (m.reservation) {
                 showReservationBanner(m.reservation);
@@ -410,13 +449,16 @@
         if (scroll) el.scrollTop = el.scrollHeight;
     }
 
-    function renderResults(results) {
+    function renderResults(results, append) {
         const panel = document.getElementById('resultsPanel');
-        panel.innerHTML = '';
-        selected = { flight: null, hotel: null, car: null };
+        if (!append) {
+            panel.innerHTML = '';
+            selected = { flight: null, hotel: null, car: null };
+        }
 
+        let html = '';
         if (results.flights && results.flights.length) {
-            panel.innerHTML += `<div class="results-section"><h3>✈ Flights</h3>${results.flights.map((f, i) =>
+            html += `<div class="results-section"><h3>✈ Flights</h3>${results.flights.map((f, i) =>
                 `<div class="result-card" id="flight-${i}" onclick="selectResult('flight', ${i})">
                     <div class="title">${esc(f.airline || '')} ${esc(f.flight_number || '')}</div>
                     <div class="detail">${esc(f.origin_city || f.origin || '')} → ${esc(f.destination_city || f.destination || '')} · ${esc(f.travel_class || 'economy')}</div>
@@ -427,7 +469,7 @@
             ).join('')}</div>`;
         }
         if (results.hotels && results.hotels.length) {
-            panel.innerHTML += `<div class="results-section"><h3>🏨 Hotels</h3>${results.hotels.map((h, i) =>
+            html += `<div class="results-section"><h3>🏨 Hotels</h3>${results.hotels.map((h, i) =>
                 `<div class="result-card" id="hotel-${i}" onclick="selectResult('hotel', ${i})">
                     <div class="title">${esc(h.name || '')} ${'★'.repeat(h.stars || 0)}</div>
                     <div class="detail">${esc(h.city || '')} · ${(h.amenities || []).slice(0, 3).join(', ')}</div>
@@ -438,7 +480,7 @@
             ).join('')}</div>`;
         }
         if (results.cars && results.cars.length) {
-            panel.innerHTML += `<div class="results-section"><h3>🚗 Cars</h3>${results.cars.map((c, i) =>
+            html += `<div class="results-section"><h3>🚗 Cars</h3>${results.cars.map((c, i) =>
                 `<div class="result-card" id="car-${i}" onclick="selectResult('car', ${i})">
                     <div class="title">${esc(c.color || '')} ${esc(c.make || '')} ${esc(c.model || '')}</div>
                     <div class="detail">${esc(c.category || '')} · ${esc(c.transmission || '')} · ${esc(c.fuel_type || '')}</div>
@@ -449,8 +491,81 @@
             ).join('')}</div>`;
         }
 
-        panel.innerHTML += '<button class="btn-reserve" id="reserveBtn" onclick="confirmReservation()" disabled>Select at least one option to reserve</button>';
+        html += '<button class="btn-reserve" id="reserveBtn" onclick="confirmReservation()" disabled>Select at least one option to reserve</button>';
+        if (append) {
+            panel.insertAdjacentHTML('beforeend', html);
+        } else {
+            panel.innerHTML = html;
+        }
     }
+
+    function _bundleItemHtml(label, icon, item, formatter) {
+        if (!item || !Object.keys(item).length) return '';
+        return `<div class="bundle-item"><div class="label">${icon} ${label}</div>${formatter(item)}</div>`;
+    }
+
+    function renderProposedBundle(bundle, searchResults) {
+        const panel = document.getElementById('resultsPanel');
+        panel.innerHTML = '';
+        selected = { flight: null, hotel: null, car: null };
+        latestResults = searchResults || { flights: [], hotels: [], cars: [] };
+
+        if (bundle.flight) selected.flight = bundle.flight;
+        if (bundle.hotel) selected.hotel = bundle.hotel;
+        if (bundle.car) selected.car = bundle.car;
+
+        let html = '<div class="bundle-card">';
+        html += '<h3>Agent\'s Recommended Trip</h3>';
+        if (bundle.rationale) {
+            html += `<div class="bundle-rationale">${esc(bundle.rationale)}</div>`;
+        }
+        html += _bundleItemHtml('Flight', '✈', bundle.flight, f =>
+            `<strong>${esc(f.airline || '')} ${esc(f.flight_number || '')}</strong><br>`
+            + `${esc(f.origin_city || '')} → ${esc(f.destination_city || '')} · EUR ${(f.price_eur || 0).toFixed(0)}`);
+        html += _bundleItemHtml('Hotel', '🏨', bundle.hotel, h =>
+            `<strong>${esc(h.name || '')}</strong> ${'★'.repeat(h.stars || 0)}<br>`
+            + `${esc(h.city || '')} · EUR ${(h.price_per_night_eur || 0).toFixed(0)}/night`);
+        html += _bundleItemHtml('Car', '🚗', bundle.car, c =>
+            `<strong>${esc(c.color || '')} ${esc(c.make || '')} ${esc(c.model || '')}</strong><br>`
+            + `${esc(c.category || '')} · EUR ${(c.price_per_day_eur || 0).toFixed(0)}/day`);
+        if (bundle.total_cost_eur) {
+            html += `<div class="bundle-total">Estimated total: EUR ${Number(bundle.total_cost_eur).toFixed(0)}</div>`;
+        }
+        html += '<div class="bundle-actions">';
+        html += '<button class="btn-bundle-confirm" onclick="confirmProposedBundle()">Confirm Booking</button>';
+        html += '<button class="btn-bundle-alt" onclick="requestAlternatives()">Search Alternatives</button>';
+        html += '</div></div>';
+        panel.innerHTML = html;
+
+        const hasResults = searchResults && (searchResults.flights?.length || searchResults.hotels?.length || searchResults.cars?.length);
+        if (hasResults) {
+            panel.insertAdjacentHTML('beforeend', '<div style="margin:12px 0 8px;font-size:12px;color:#6c7086;">All search results — pick different options if you prefer:</div>');
+            renderResults(searchResults, true);
+            [['flight', bundle.flight, 'flights'], ['hotel', bundle.hotel, 'hotels'], ['car', bundle.car, 'cars']].forEach(([type, item, key]) => {
+                if (!item) return;
+                const list = searchResults[key] || [];
+                const idx = list.findIndex(x => x._id === item._id || JSON.stringify(x) === JSON.stringify(item));
+                if (idx >= 0) {
+                    const card = document.getElementById(`${type}-${idx}`);
+                    if (card) card.classList.add('selected');
+                }
+            });
+        }
+        _updateReserveBtn();
+    }
+
+    window.confirmProposedBundle = function () {
+        if ((!selected.flight && !selected.hotel && !selected.car) || !activeThread) return;
+        confirmReservation();
+    };
+
+    window.requestAlternatives = function () {
+        const input = document.getElementById('chatInput');
+        if (input) {
+            input.value = 'Show me alternative options — cheaper or different preferences';
+            input.focus();
+        }
+    };
 
     function _updateReserveBtn() {
         const btn = document.getElementById('reserveBtn');

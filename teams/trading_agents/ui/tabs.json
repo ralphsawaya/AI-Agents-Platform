@@ -1,9 +1,0 @@
-{
-    "tabs": [
-        { "id": "trading",  "label": "Trading" },
-        { "id": "trades",   "label": "Trades" },
-        { "id": "signals",  "label": "Signals" },
-        { "id": "strategy", "label": "Strategy" },
-        { "id": "backtest", "label": "Backtest" }
-    ]
-}

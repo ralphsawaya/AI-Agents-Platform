@@ -186,6 +186,7 @@ async def search_progress(agent_id: str, thread_id: str):
         "flights": doc.get("flights"),
         "hotels": doc.get("hotels"),
         "cars": doc.get("cars"),
+        "categories": doc.get("categories") or [],
         "done": doc.get("done", False),
     })
 
@@ -429,9 +430,71 @@ _PROMPT_TEMPLATES = [
 ]
 
 
+def _format_suggestion(tmpl: str, flight: dict, hotel: dict, car: dict) -> str:
+    amenities = hotel.get("amenities", ["pool"])
+    return tmpl.format(
+        airline=flight.get("airline", ""),
+        orig=flight.get("origin_city", ""),
+        dest=flight.get("destination_city", ""),
+        date=flight.get("date", "2026-06-15"),
+        flight_class=flight.get("travel_class", "economy"),
+        stars=hotel.get("stars", 4),
+        hotel_city=hotel.get("city", ""),
+        hotel_neighborhood=hotel.get("neighborhood", "City Center"),
+        amenity=amenities[0] if amenities else "pool",
+        amenity2=amenities[1] if len(amenities) > 1 else "gym",
+        rating=hotel.get("rating", 4.0),
+        color=car.get("color", ""),
+        car_make=car.get("make", ""),
+        car_model=car.get("model", ""),
+        car_cat=car.get("category", ""),
+        transmission=car.get("transmission", "automatic"),
+        fuel=car.get("fuel_type", ""),
+    )
+
+
+def _sample_coherent_trips(atlas_db, count: int = 3) -> list[tuple[dict, dict, dict]]:
+    """Return flight/hotel/car triples where hotel and car match the flight destination."""
+    pipeline = [
+        {"$sample": {"size": count * 8}},
+        {
+            "$lookup": {
+                "from": "trip_hotels",
+                "let": {"dest": "$destination_city"},
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$city", "$$dest"]}}},
+                    {"$sample": {"size": 1}},
+                ],
+                "as": "hotel",
+            }
+        },
+        {
+            "$lookup": {
+                "from": "trip_cars",
+                "let": {"dest": "$destination_city"},
+                "pipeline": [
+                    {"$match": {"$expr": {"$eq": ["$pickup_city", "$$dest"]}}},
+                    {"$sample": {"size": 1}},
+                ],
+                "as": "car",
+            }
+        },
+        {
+            "$match": {
+                "destination_city": {"$nin": [None, ""]},
+                "hotel.0": {"$exists": True},
+                "car.0": {"$exists": True},
+            }
+        },
+        {"$limit": count},
+    ]
+    rows = list(atlas_db["trip_flights"].aggregate(pipeline))
+    return [(row, row["hotel"][0], row["car"][0]) for row in rows]
+
+
 @router.get("/{agent_id}/suggestions")
 async def get_suggestions(agent_id: str):
-    """Return 3 natural-language prompts built from random real Atlas documents."""
+    """Return 3 natural-language prompts built from coherent Atlas trip data."""
     try:
         uri = await _get_atlas_uri(agent_id)
         if not uri:
@@ -440,40 +503,15 @@ async def get_suggestions(agent_id: str):
         if atlas_db is None:
             return _ok({"suggestions": _fallback_suggestions()})
 
-        flights = list(atlas_db["trip_flights"].aggregate([{"$sample": {"size": 6}}]))
-        hotels = list(atlas_db["trip_hotels"].aggregate([{"$sample": {"size": 6}}]))
-        cars = list(atlas_db["trip_cars"].aggregate([{"$sample": {"size": 6}}]))
-
-        if not flights or not hotels or not cars:
+        trips = _sample_coherent_trips(atlas_db, count=3)
+        if not trips:
             return _ok({"suggestions": _fallback_suggestions()})
 
-        templates = random.sample(_PROMPT_TEMPLATES, min(3, len(_PROMPT_TEMPLATES)))
-        suggestions = []
-        for i, tmpl in enumerate(templates):
-            f = flights[i % len(flights)]
-            h = hotels[i % len(hotels)]
-            c = cars[i % len(cars)]
-            amenities = h.get("amenities", ["pool"])
-            prompt = tmpl.format(
-                airline=f.get("airline", ""),
-                orig=f.get("origin_city", ""),
-                dest=f.get("destination_city", ""),
-                date=f.get("date", "2026-06-15"),
-                flight_class=f.get("travel_class", "economy"),
-                stars=h.get("stars", 4),
-                hotel_city=h.get("city", ""),
-                hotel_neighborhood=h.get("neighborhood", "City Center"),
-                amenity=amenities[0] if amenities else "pool",
-                amenity2=amenities[1] if len(amenities) > 1 else "gym",
-                rating=h.get("rating", 4.0),
-                color=c.get("color", ""),
-                car_make=c.get("make", ""),
-                car_model=c.get("model", ""),
-                car_cat=c.get("category", ""),
-                transmission=c.get("transmission", "automatic"),
-                fuel=c.get("fuel_type", ""),
-            )
-            suggestions.append(prompt)
+        templates = random.sample(_PROMPT_TEMPLATES, min(len(trips), len(_PROMPT_TEMPLATES)))
+        suggestions = [
+            _format_suggestion(tmpl, flight, hotel, car)
+            for tmpl, (flight, hotel, car) in zip(templates, trips)
+        ]
         return _ok({"suggestions": suggestions})
     except Exception as exc:
         logger.warning("Suggestions generation failed: %s", exc)

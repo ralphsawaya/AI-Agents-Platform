@@ -3,18 +3,22 @@
 from typing import Any, TypedDict
 
 
-class TripSearchState(TypedDict):
+class TripAgentState(TypedDict):
     query: str
     thread_id: str
     chat_history: list[dict[str, str]]
-    is_search: bool
-    nonsearch_reply: str
-    flight_filters: dict[str, Any]
-    hotel_filters: dict[str, Any]
-    car_filters: dict[str, Any]
-    flight_results: list[dict[str, Any]]
-    hotel_results: list[dict[str, Any]]
-    car_results: list[dict[str, Any]]
+    mode: str
+    reservation_id: str
+    reservation: dict[str, Any]
+    plan: dict[str, Any]
+    intent: str
+    reply: str
+    tool_results: list[dict[str, Any]]
+    search_results: dict[str, Any]
+    proposed_bundle: dict[str, Any] | None
+    tool_trace: list[dict[str, Any]]
+    replan_count: int
+    modify_category: str
     error: str
 
 
