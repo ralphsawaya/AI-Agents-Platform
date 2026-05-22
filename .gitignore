@@ -17,6 +17,7 @@ build/
 .env
 .env.*
 !.env.example
+.atlas-rotation.txt
 
 # Logs
 *.log
