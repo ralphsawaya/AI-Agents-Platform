@@ -1,0 +1,1629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>How the trip_agents system works — a primer for engineers new to agentic AI</title>
+<style>
+  /* ---------- Reset & base ---------- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #fbfaf7;
+    color: #1f2933;
+    line-height: 1.6;
+    font-size: 16px;
+  }
+  ::selection { background: #cfe7e2; }
+
+  /* ---------- Color tokens ---------- */
+  :root {
+    --bg: #fbfaf7;
+    --surface: #ffffff;
+    --surface-muted: #f3f1ec;
+    --ink: #1f2933;
+    --ink-soft: #4b5560;
+    --ink-mute: #7a8593;
+    --rule: #e5e1d8;
+    --accent: #1f6f6a;       /* deep teal */
+    --accent-soft: #d4ebe7;
+    --flight: #2563a8;       /* sky-ish */
+    --hotel:  #c07a1f;       /* warm amber */
+    --car:    #2f7d3a;       /* emerald */
+    --warn:   #b65a3a;
+    --code-bg: #1b2230;
+    --code-ink: #e7ecf3;
+    --code-comment: #8aa1b6;
+    --code-string: #c5e1a5;
+    --code-keyword: #f0a78a;
+    --code-number: #f7d488;
+    --shadow: 0 1px 2px rgba(20,25,35,.04), 0 8px 24px rgba(20,25,35,.06);
+  }
+
+  /* ---------- Layout ---------- */
+  .page {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 48px;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 32px 28px 96px;
+  }
+  @media (max-width: 900px) {
+    .page { grid-template-columns: 1fr; gap: 0; padding: 16px; }
+    .toc { position: static !important; max-height: none !important; margin-bottom: 24px; }
+  }
+
+  /* ---------- TOC ---------- */
+  .toc {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    border-right: 1px solid var(--rule);
+    padding-right: 16px;
+    font-size: 14px;
+  }
+  .toc h2 {
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin: 0 0 12px;
+  }
+  .toc ol { list-style: none; padding: 0; margin: 0; counter-reset: toc; }
+  .toc ol li {
+    counter-increment: toc;
+    margin: 0;
+    padding: 4px 0;
+  }
+  .toc ol li a {
+    color: var(--ink-soft);
+    text-decoration: none;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    padding: 2px 0;
+    border-radius: 4px;
+  }
+  .toc ol li a::before {
+    content: counter(toc, decimal-leading-zero);
+    color: var(--ink-mute);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+  }
+  .toc ol li a:hover { color: var(--accent); }
+  .toc ol li a.active { color: var(--accent); font-weight: 600; }
+
+  /* ---------- Content ---------- */
+  main { min-width: 0; }
+  header.hero {
+    padding: 8px 0 40px;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 48px;
+  }
+  .eyebrow {
+    font-size: 12px;
+    letter-spacing: .18em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.15;
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+  }
+  .lede {
+    font-size: 18px;
+    color: var(--ink-soft);
+    max-width: 64ch;
+    margin: 0 0 24px;
+  }
+  .audience {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  @media (max-width: 600px) { .audience { grid-template-columns: 1fr; } }
+  .audience .card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 14px;
+    color: var(--ink-soft);
+  }
+  .audience .card strong { color: var(--ink); display: block; margin-bottom: 4px; }
+
+  section { margin: 0 0 64px; scroll-margin-top: 24px; }
+  section h2 {
+    font-size: 24px;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+  }
+  section h2 .num {
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-mute);
+    letter-spacing: .14em;
+  }
+  section h3 {
+    font-size: 17px;
+    margin: 28px 0 8px;
+    color: var(--ink);
+  }
+  section p, section li { color: var(--ink); }
+  section .sub {
+    color: var(--ink-soft);
+    margin: 0 0 24px;
+    max-width: 70ch;
+  }
+
+  /* ---------- Components ---------- */
+  .callout {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 14px 18px;
+    border-radius: 0 8px 8px 0;
+    margin: 20px 0;
+    font-size: 15px;
+  }
+  .callout strong { color: var(--accent); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+  @media (max-width: 720px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+  .term {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .term .name {
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 4px;
+    font-size: 15px;
+  }
+  .term .body { color: var(--ink-soft); font-size: 14.5px; }
+  .term .example {
+    margin-top: 10px;
+    border-top: 1px dashed var(--rule);
+    padding-top: 10px;
+    font-size: 13.5px;
+    color: var(--ink-soft);
+  }
+  .term .example b { color: var(--ink); }
+
+  /* ---------- Tables ---------- */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  th { background: var(--surface-muted); font-weight: 600; color: var(--ink); }
+  td code { font-size: 13px; }
+
+  /* ---------- Code blocks ---------- */
+  pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+  code { background: var(--surface-muted); padding: 1px 6px; border-radius: 4px; font-size: 13.5px; color: var(--ink); }
+  pre {
+    background: var(--code-bg);
+    color: var(--code-ink);
+    padding: 16px 18px;
+    border-radius: 10px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 14px 0;
+    box-shadow: var(--shadow);
+  }
+  pre code { background: transparent; padding: 0; color: inherit; font-size: inherit; }
+  .tok-c  { color: var(--code-comment); font-style: italic; }
+  .tok-s  { color: var(--code-string); }
+  .tok-k  { color: var(--code-keyword); }
+  .tok-n  { color: var(--code-number); }
+  .tok-fn { color: #b9d6ff; }
+
+  .filename {
+    display: inline-block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--ink-mute);
+    margin-bottom: -8px;
+    padding: 4px 10px;
+    background: var(--surface-muted);
+    border: 1px solid var(--rule);
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
+
+  /* ---------- Diagrams ---------- */
+  .diagram {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 18px;
+    margin: 18px 0;
+    box-shadow: var(--shadow);
+  }
+  .diagram svg { display: block; width: 100%; height: auto; }
+  .diagram .caption {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--ink-mute);
+    text-align: center;
+  }
+
+  /* Hero animated graphic */
+  .hero-art {
+    margin-top: 24px;
+    background: linear-gradient(180deg, #ffffff, #f6f3ec);
+    border: 1px solid var(--rule);
+    border-radius: 14px;
+    padding: 18px 14px;
+    overflow: hidden;
+  }
+  .hero-art svg text { font-family: inherit; }
+
+  /* Numbered step legend under the hero diagram */
+  .hero-steps {
+    margin-top: 14px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 12px;
+    padding: 14px 18px;
+    box-shadow: var(--shadow);
+  }
+  .hero-steps .title {
+    margin: 0 0 10px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    letter-spacing: .01em;
+  }
+  .hero-steps .title em { color: var(--ink); font-style: normal; }
+  .hero-steps ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 28px;
+  }
+  @media (max-width: 720px) { .hero-steps ol { grid-template-columns: 1fr; } }
+  .hero-steps li {
+    display: flex;
+    gap: 10px;
+    align-items: baseline;
+    padding: 5px 0;
+    font-size: 13.5px;
+    color: var(--ink);
+    border-top: 1px dashed var(--rule);
+  }
+  .hero-steps li:nth-child(-n+2) { border-top: none; }
+  @media (max-width: 720px) {
+    .hero-steps li:nth-child(2) { border-top: 1px dashed var(--rule); }
+  }
+  .hero-steps li .num {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #c07a1f;
+    color: #fff;
+    font-weight: 700;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .hero-steps li code { font-size: 12.5px; }
+  /* Pulse is applied to an *inner* <g> so it doesn't replace the outer SVG translate.
+     transform-box: fill-box pivots the scale around the group's own bounding box. */
+  .pulse {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: pulse 3.4s ease-in-out infinite;
+  }
+  .pulse-b { animation-delay: 1.1s; }
+  .pulse-c { animation-delay: 2.2s; }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: .92; }
+    50%      { transform: scale(1.06); opacity: 1; }
+  }
+  .signal {
+    stroke-dasharray: 6 6;
+    animation: dash 2.4s linear infinite;
+  }
+  @keyframes dash { to { stroke-dashoffset: -120; } }
+
+  /* Plan-and-execute animated traveling dot */
+  .flow-dot {
+    fill: var(--accent);
+    animation: flow 7s ease-in-out infinite;
+  }
+  @keyframes flow {
+    0%   { transform: translate(60px, 80px); }
+    14%  { transform: translate(230px, 80px); }
+    28%  { transform: translate(400px, 80px); }
+    42%  { transform: translate(560px, 80px); }
+    56%  { transform: translate(560px, 80px); }
+    70%  { transform: translate(700px, 80px); }
+    100% { transform: translate(700px, 80px); }
+  }
+
+  /* Timeline */
+  ol.timeline { list-style: none; padding: 0; margin: 0; position: relative; }
+  ol.timeline::before {
+    content: '';
+    position: absolute;
+    left: 18px; top: 8px; bottom: 8px;
+    width: 2px; background: var(--rule);
+  }
+  ol.timeline li {
+    position: relative;
+    padding: 0 0 20px 48px;
+  }
+  ol.timeline li::before {
+    content: '';
+    position: absolute;
+    left: 12px; top: 8px;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    box-shadow: 0 0 0 4px var(--bg);
+  }
+  ol.timeline li .when {
+    font-size: 12px;
+    color: var(--ink-mute);
+    letter-spacing: .04em;
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 2px;
+  }
+  ol.timeline li .what { font-weight: 600; color: var(--ink); }
+  ol.timeline li .body { color: var(--ink-soft); font-size: 14.5px; margin-top: 4px; }
+  ol.timeline li.is-llm::before  { border-color: var(--accent); background: var(--accent-soft); }
+  ol.timeline li.is-tool::before { border-color: var(--flight); }
+  ol.timeline li.is-db::before   { border-color: var(--car); }
+  ol.timeline li.is-ui::before   { border-color: var(--hotel); }
+
+  /* Tag chips */
+  .chip {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    margin-right: 6px;
+    background: var(--surface-muted);
+    color: var(--ink-soft);
+    border: 1px solid var(--rule);
+  }
+  .chip.llm  { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .chip.tool { background: #e4ecf6; color: var(--flight); border-color: transparent; }
+  .chip.db   { background: #e4f0e6; color: var(--car); border-color: transparent; }
+  .chip.ui   { background: #f7e8d2; color: var(--hotel); border-color: transparent; }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    margin-top: 64px;
+    padding-top: 24px;
+    color: var(--ink-mute);
+    font-size: 13px;
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="page">
+  <!-- =================== SIDEBAR / TOC =================== -->
+  <aside class="toc" aria-label="Table of contents">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#mental-model">The 30-second mental model</a></li>
+      <li><a href="#primer">Agentic AI primer</a></li>
+      <li><a href="#architecture">System architecture</a></li>
+      <li><a href="#loop">The plan-and-execute loop</a></li>
+      <li><a href="#orchestrator">Deep dive: orchestrator</a></li>
+      <li><a href="#subagents">Deep dive: specialist sub-agents</a></li>
+      <li><a href="#memory">Deep dive: memory</a></li>
+      <li><a href="#modes">Modes beyond chat</a></li>
+      <li><a href="#walkthrough">Worked walkthrough</a></li>
+      <li><a href="#glossary">Glossary &amp; source map</a></li>
+    </ol>
+  </aside>
+
+  <main>
+    <!-- =================== HERO =================== -->
+    <header class="hero">
+      <div class="eyebrow">A primer for engineers new to agentic AI</div>
+      <h1>How the <code>trip_agents</code> system works</h1>
+      <p class="lede">
+        <code>trip_agents</code> is a small team of cooperating AI agents that turn natural-language
+        travel requests — <em>"plan a quiet weekend in Athens with a manual rental car"</em> — into
+        ranked flight, hotel, and car options, and lets the user book, modify, or cancel from chat.
+        This page explains how it does that, top-down, assuming you've never built with LLM agents before.
+      </p>
+
+      <div class="audience">
+        <div class="card"><strong>If you're a software engineer</strong>
+          You'll get the data flow, the orchestration code, and the shape of every message —
+          enough to add a tool or extend a sub-agent confidently.
+        </div>
+        <div class="card"><strong>If you're a software architect</strong>
+          You'll see the design trade-offs (plan-and-execute vs ReAct, JSON planning vs native tool calls,
+          memory layers, two-database split) and where to draw the boundaries.
+        </div>
+      </div>
+
+      <!-- Hero diagram: full flow with numbered steps -->
+      <div class="hero-art" aria-hidden="true">
+        <svg viewBox="0 0 1180 760" role="img">
+          <defs>
+            <marker id="hero-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#1f6f6a"/>
+            </marker>
+            <marker id="hero-arr-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#7a8593"/>
+            </marker>
+            <marker id="hero-arr-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#c07a1f"/>
+            </marker>
+            <marker id="hero-arr-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#2563a8"/>
+            </marker>
+            <style>
+              .hbox    { stroke-width: 1.5; }
+              .hnode   { fill: #1f6f6a; }
+              .hnode-t { fill: #fff; font-weight: 700; font-size: 14px; text-anchor: middle; }
+              .hnode-s { fill: #cfe7e2; font-size: 11px; text-anchor: middle; }
+              .hsubt   { fill: #7a8593; font-size: 10.5px; }
+              .htool   { fill: #f3f1ec; stroke: #7a8593; }
+              .htool-t { fill: #1f2933; font-size: 12px; text-anchor: middle; font-weight: 600; }
+              .hsearch { fill: #fff; stroke-width: 2; }
+              .stepC   { fill: #c07a1f; stroke: #fff; stroke-width: 2; }
+              .stepT   { fill: #fff; font-weight: 700; font-size: 13px; text-anchor: middle; }
+              .hedge   { stroke: #1f6f6a; stroke-width: 2; fill: none; }
+              .hedge-g { stroke: #7a8593; stroke-width: 1.5; fill: none; }
+              .hedge-d { stroke: #7a8593; stroke-width: 1.4; fill: none; stroke-dasharray: 4 4; }
+              .hedge-llm { stroke: #c07a1f; stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; }
+              .hedge-mongo { stroke: #2f7d3a; stroke-width: 1.4; fill: none; stroke-dasharray: 3 4; }
+            </style>
+          </defs>
+
+          <!-- =================== TOP STRIP: Browser → API → spawn =================== -->
+          <rect x="60"  y="20" width="200" height="46" rx="9" fill="#fff" class="hbox" stroke="#7a8593"/>
+          <text x="160" y="42" text-anchor="middle" font-size="13" font-weight="700" fill="#1f2933">Browser UI</text>
+          <text x="160" y="58" text-anchor="middle" font-size="10.5" fill="#4b5560">trip_planner.html</text>
+
+          <rect x="340" y="20" width="320" height="46" rx="9" fill="#e4ecf6" class="hbox" stroke="#2563a8"/>
+          <text x="500" y="40" text-anchor="middle" font-size="13" font-weight="700" fill="#14375c">API · /api/trip/{id}/messages</text>
+          <text x="500" y="56" text-anchor="middle" font-size="10.5" fill="#14375c">FastAPI · routes/trip.py</text>
+
+          <path class="hedge-g" d="M260 43 L340 43" marker-end="url(#hero-arr-gray)"/>
+          <circle class="stepC" cx="300" cy="43" r="12"/><text class="stepT" x="300" y="47">1</text>
+
+          <path class="hedge-g" d="M500 66 L500 96" marker-end="url(#hero-arr-gray)"/>
+          <circle class="stepC" cx="500" cy="81" r="12"/><text class="stepT" x="500" y="85">2</text>
+          <text x="516" y="85" font-size="11" fill="#7a8593">spawn subprocess (AGENT_ARGS)</text>
+
+          <!-- =================== ORCHESTRATOR CONTAINER =================== -->
+          <rect x="40" y="100" width="1100" height="470" rx="14" fill="#fcfbf7" stroke="#1f6f6a" stroke-width="2"/>
+          <text x="60" y="124" font-size="12" font-weight="700" fill="#1f6f6a" letter-spacing=".1em">ORCHESTRATOR PROCESS · LangGraph state machine</text>
+          <text x="60" y="140" font-size="11" fill="#7a8593">orchestrator/main.py → orchestrator/graph.py</text>
+
+          <!-- LLM provider service (top center inside orchestrator zone) -->
+          <rect x="420" y="148" width="260" height="44" rx="22" fill="#fef6e7" stroke="#c07a1f" stroke-dasharray="4 3"/>
+          <text x="550" y="167" text-anchor="middle" font-size="12" font-weight="700" fill="#7a4413">LLM provider</text>
+          <text x="550" y="182" text-anchor="middle" font-size="10.5" fill="#7a4413">Claude · Gemini · OpenAI · Groq · DeepSeek</text>
+
+          <!-- ============= 4 graph nodes ============= -->
+          <!-- plan -->
+          <rect class="hnode" x="80"  y="225" width="170" height="60" rx="10"/>
+          <text class="hnode-t" x="165" y="251">plan</text>
+          <text class="hnode-s" x="165" y="270">LLM call #1</text>
+
+          <!-- execute_tools -->
+          <rect class="hnode" x="300" y="225" width="200" height="60" rx="10"/>
+          <text class="hnode-t" x="400" y="251">execute_tools</text>
+          <text class="hnode-s" x="400" y="270">ThreadPoolExecutor</text>
+
+          <!-- synthesize -->
+          <rect class="hnode" x="550" y="225" width="190" height="60" rx="10"/>
+          <text class="hnode-t" x="645" y="251">synthesize</text>
+          <text class="hnode-s" x="645" y="270">LLM call #2</text>
+
+          <!-- persist -->
+          <rect class="hnode" x="790" y="225" width="170" height="60" rx="10"/>
+          <text class="hnode-t" x="875" y="251">persist</text>
+          <text class="hnode-s" x="875" y="270">+ memory thread</text>
+
+          <!-- END -->
+          <rect x="1000" y="235" width="90" height="40" rx="8" fill="#7a8593"/>
+          <text class="hnode-t" x="1045" y="260">END</text>
+
+          <!-- Node edges -->
+          <path class="hedge" d="M250 255 L300 255" marker-end="url(#hero-arr)"/>
+          <path class="hedge" d="M500 255 L550 255" marker-end="url(#hero-arr)"/>
+          <path class="hedge" d="M740 255 L790 255" marker-end="url(#hero-arr)"/>
+          <path class="hedge" d="M960 255 L1000 255" marker-end="url(#hero-arr)"/>
+
+          <!-- Step circles between nodes -->
+          <circle class="stepC" cx="275" cy="255" r="12"/><text class="stepT" x="275" y="259">4</text>
+          <circle class="stepC" cx="525" cy="255" r="12"/><text class="stepT" x="525" y="259">7</text>
+          <circle class="stepC" cx="765" cy="255" r="12"/><text class="stepT" x="765" y="259">9</text>
+
+          <!-- LLM dashed connections (curve from LLM block down to plan & synthesize) -->
+          <path class="hedge-llm" d="M460 192 Q 360 210 200 225" marker-end="url(#hero-arr-amber)"/>
+          <circle class="stepC" cx="340" cy="206" r="12"/><text class="stepT" x="340" y="210">3</text>
+
+          <path class="hedge-llm" d="M620 192 Q 640 205 650 225" marker-end="url(#hero-arr-amber)"/>
+          <circle class="stepC" cx="640" cy="210" r="12"/><text class="stepT" x="640" y="214">8</text>
+
+          <!-- arrow from spawn (step 2) down into the orchestrator pointing to the plan node -->
+          <path class="hedge-g" d="M500 100 Q 200 130 165 225" marker-end="url(#hero-arr-gray)"/>
+
+          <!-- ============= execute_tools → tools registry ============= -->
+          <path class="hedge" d="M400 285 L400 320" marker-end="url(#hero-arr)"/>
+          <circle class="stepC" cx="400" cy="305" r="12"/><text class="stepT" x="400" y="309">5</text>
+          <text x="418" y="309" font-size="11" fill="#4b5560">fan out (parallel for search tools)</text>
+
+          <!-- Tools registry container -->
+          <rect x="70" y="320" width="980" height="100" rx="10" fill="#fff" stroke="#7a8593" stroke-dasharray="2 3"/>
+          <text x="86" y="340" font-size="11" font-weight="700" fill="#4b5560" letter-spacing=".06em">TOOLS REGISTRY (orchestrator/tools.py)</text>
+          <text x="86" y="356" font-size="10.5" fill="#7a8593">5 plain Python functions; dispatched by name from the JSON plan</text>
+
+          <!-- 5 tool boxes -->
+          <!-- search_flights -->
+          <rect class="hsearch" x="90"  y="370" width="160" height="40" rx="8" stroke="#2563a8"/>
+          <text x="170" y="395" text-anchor="middle" font-size="12" font-weight="700" fill="#14375c">search_flights</text>
+          <!-- search_hotels -->
+          <rect class="hsearch" x="260" y="370" width="160" height="40" rx="8" stroke="#c07a1f"/>
+          <text x="340" y="395" text-anchor="middle" font-size="12" font-weight="700" fill="#7a4413">search_hotels</text>
+          <!-- search_cars -->
+          <rect class="hsearch" x="430" y="370" width="160" height="40" rx="8" stroke="#2f7d3a"/>
+          <text x="510" y="395" text-anchor="middle" font-size="12" font-weight="700" fill="#1f4a2a">search_cars</text>
+          <!-- get_user_preferences -->
+          <rect class="htool" x="610" y="370" width="200" height="40" rx="8"/>
+          <text class="htool-t" x="710" y="395">get_user_preferences</text>
+          <!-- get_reservation -->
+          <rect class="htool" x="830" y="370" width="200" height="40" rx="8"/>
+          <text class="htool-t" x="930" y="395">get_reservation</text>
+
+          <!-- ============= sub-agents under the 3 search tools ============= -->
+          <text x="86" y="450" font-size="11" font-weight="700" fill="#4b5560" letter-spacing=".06em">SUB-AGENTS (small LangGraphs · embed → $vectorSearch)</text>
+
+          <!-- agent_flight -->
+          <rect x="90"  y="460" width="160" height="68" rx="10" fill="#e4ecf6" stroke="#2563a8" stroke-width="2"/>
+          <text x="170" y="481" text-anchor="middle" font-size="13" font-weight="700" fill="#14375c">agent_flight</text>
+          <text x="170" y="498" text-anchor="middle" font-size="10.5" fill="#14375c">embed → $vectorSearch</text>
+          <text x="170" y="513" text-anchor="middle" font-size="10" fill="#7a8593">→ trip_flights</text>
+
+          <!-- agent_hotel -->
+          <rect x="260" y="460" width="160" height="68" rx="10" fill="#f7e8d2" stroke="#c07a1f" stroke-width="2"/>
+          <text x="340" y="481" text-anchor="middle" font-size="13" font-weight="700" fill="#7a4413">agent_hotel</text>
+          <text x="340" y="498" text-anchor="middle" font-size="10.5" fill="#7a4413">embed → $vectorSearch</text>
+          <text x="340" y="513" text-anchor="middle" font-size="10" fill="#7a8593">→ trip_hotels</text>
+
+          <!-- agent_car -->
+          <rect x="430" y="460" width="160" height="68" rx="10" fill="#e4f0e6" stroke="#2f7d3a" stroke-width="2"/>
+          <text x="510" y="481" text-anchor="middle" font-size="13" font-weight="700" fill="#1f4a2a">agent_car</text>
+          <text x="510" y="498" text-anchor="middle" font-size="10.5" fill="#1f4a2a">embed → $vectorSearch</text>
+          <text x="510" y="513" text-anchor="middle" font-size="10" fill="#7a8593">→ trip_cars</text>
+
+          <!-- Arrows from search tools to their sub-agents -->
+          <path d="M170 410 L170 460" stroke="#2563a8" stroke-width="1.6" fill="none" marker-end="url(#hero-arr-blue)"/>
+          <path d="M340 410 L340 460" stroke="#c07a1f" stroke-width="1.6" fill="none" marker-end="url(#hero-arr-amber)"/>
+          <path d="M510 410 L510 460" stroke="#2f7d3a" stroke-width="1.6" fill="none" marker-end="url(#hero-arr-amber)"/>
+          <circle class="stepC" cx="340" cy="435" r="12"/><text class="stepT" x="340" y="439">6</text>
+
+          <!-- Small note: tools without sub-agents -->
+          <text x="710" y="438" text-anchor="middle" font-size="10.5" fill="#7a8593">direct MongoDB read</text>
+          <text x="930" y="438" text-anchor="middle" font-size="10.5" fill="#7a8593">direct MongoDB read</text>
+          <path class="hedge-mongo" d="M710 410 L710 600" marker-end="url(#hero-arr-gray)"/>
+          <path class="hedge-mongo" d="M930 410 L930 600" marker-end="url(#hero-arr-gray)"/>
+
+          <!-- =================== EXTERNAL SERVICES =================== -->
+          <!-- Voyage AI -->
+          <rect x="60"  y="600" width="200" height="56" rx="10" fill="#fef6e7" stroke="#c07a1f" stroke-dasharray="4 3"/>
+          <text x="160" y="624" text-anchor="middle" font-size="12" font-weight="700" fill="#7a4413">Voyage AI</text>
+          <text x="160" y="641" text-anchor="middle" font-size="10.5" fill="#7a4413">voyage-3-lite · 512-d embeddings</text>
+
+          <!-- MongoDB -->
+          <rect x="290" y="600" width="850" height="80" rx="10" fill="#e4f0e6" stroke="#2f7d3a"/>
+          <text x="306" y="622" font-size="12" font-weight="700" fill="#1f4a2a">MongoDB · trip_data @ 127.0.0.1:55440</text>
+          <text x="306" y="640" font-size="10.5" fill="#1f4a2a">collections (vector-indexed) and chat / reservation stores</text>
+          <g font-size="10.5" fill="#1f4a2a">
+            <rect x="306" y="650" width="120" height="22" rx="5" fill="#fff" stroke="#2f7d3a"/>
+            <text x="366" y="665" text-anchor="middle">trip_flights</text>
+            <rect x="436" y="650" width="120" height="22" rx="5" fill="#fff" stroke="#2f7d3a"/>
+            <text x="496" y="665" text-anchor="middle">trip_hotels</text>
+            <rect x="566" y="650" width="100" height="22" rx="5" fill="#fff" stroke="#2f7d3a"/>
+            <text x="616" y="665" text-anchor="middle">trip_cars</text>
+            <rect x="676" y="650" width="140" height="22" rx="5" fill="#fff" stroke="#2f7d3a"/>
+            <text x="746" y="665" text-anchor="middle">trip_longMemory</text>
+            <rect x="826" y="650" width="140" height="22" rx="5" fill="#fff" stroke="#2f7d3a"/>
+            <text x="896" y="665" text-anchor="middle">trip_reservations</text>
+            <rect x="976" y="650" width="150" height="22" rx="5" fill="#fff" stroke="#2f7d3a"/>
+            <text x="1051" y="665" text-anchor="middle">trip_chatPersistence</text>
+          </g>
+
+          <!-- Sub-agents → Voyage AI (embed step) -->
+          <path d="M170 528 Q 130 560 160 600" stroke="#c07a1f" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#hero-arr-amber)"/>
+          <path d="M340 528 Q 280 560 200 600" stroke="#c07a1f" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#hero-arr-amber)"/>
+          <path d="M510 528 Q 380 560 240 600" stroke="#c07a1f" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#hero-arr-amber)"/>
+
+          <!-- Sub-agents → MongoDB (vectorSearch) -->
+          <path d="M170 528 L366 650" stroke="#2f7d3a" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#hero-arr-gray)"/>
+          <path d="M340 528 L496 650" stroke="#2f7d3a" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#hero-arr-gray)"/>
+          <path d="M510 528 L616 650" stroke="#2f7d3a" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#hero-arr-gray)"/>
+
+          <!-- persist → trip_chatPersistence and trip_longMemory (memory thread) -->
+          <path d="M875 285 Q 900 500 1051 650" stroke="#2f7d3a" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#hero-arr-gray)"/>
+          <path d="M895 285 Q 920 480 746 650" stroke="#c07a1f" stroke-width="1.4" fill="none" stroke-dasharray="4 3" marker-end="url(#hero-arr-amber)"/>
+
+          <!-- Legend labels for line styles -->
+          <g font-size="10.5" fill="#7a8593">
+            <line x1="60" y1="708" x2="86" y2="708" stroke="#1f6f6a" stroke-width="2"/>
+            <text x="92" y="712">orchestrator edge</text>
+            <line x1="220" y1="708" x2="246" y2="708" stroke="#c07a1f" stroke-width="1.6" stroke-dasharray="5 4"/>
+            <text x="252" y="712">LLM call</text>
+            <line x1="330" y1="708" x2="356" y2="708" stroke="#2f7d3a" stroke-width="1.4" stroke-dasharray="3 4"/>
+            <text x="362" y="712">MongoDB read/write</text>
+            <line x1="498" y1="708" x2="524" y2="708" stroke="#7a8593" stroke-width="1.5"/>
+            <text x="530" y="712">process boundary</text>
+            <circle cx="660" cy="708" r="8" fill="#c07a1f" stroke="#fff" stroke-width="1.5"/>
+            <text x="673" y="712">numbered step in the sample flow below</text>
+          </g>
+        </svg>
+      </div>
+
+      <!-- Numbered steps explaining the diagram -->
+      <div class="hero-steps">
+        <p class="title">Sample request walking through the diagram: <em>“Plan a full trip to Amsterdam — flight, hotel and car”</em></p>
+        <ol>
+          <li><span class="num">1</span><span>User message arrives at <code>/api/trip/{id}/threads/{tid}/messages</code> via the chat box in <code>trip_planner.html</code>.</span></li>
+          <li><span class="num">2</span><span>The FastAPI route spawns a fresh Python subprocess running the orchestrator, passing the message via <code>AGENT_ARGS</code>.</span></li>
+          <li><span class="num">3</span><span>The <code>plan</code> node calls the LLM (call #1) with the user query, last 8 messages, and long-term preferences — and receives a JSON plan: <code>{ intent: "search", tool_calls: [...] }</code>.</span></li>
+          <li><span class="num">4</span><span>Control moves to <code>execute_tools</code>, which will dispatch each call from the plan by name through the <code>TOOL_REGISTRY</code>.</span></li>
+          <li><span class="num">5</span><span>The three search tools fan out concurrently via <code>ThreadPoolExecutor</code>; the two read-only tools (<code>get_user_preferences</code>, <code>get_reservation</code>) read MongoDB directly without a sub-agent.</span></li>
+          <li><span class="num">6</span><span>Each search tool invokes its <strong>sub-agent</strong> (a tiny LangGraph): embed the query with Voyage AI, then run <code>$vectorSearch</code> against the matching MongoDB collection — top 3 hits per category.</span></li>
+          <li><span class="num">7</span><span>Merged <code>search_results</code> are handed to <code>synthesize</code>, which now has flights + hotels + cars to choose from.</span></li>
+          <li><span class="num">8</span><span><code>synthesize</code> calls the LLM (call #2) to pick the best bundle and write a friendly reply; receives <code>content</code> + <code>proposed_bundle</code>.</span></li>
+          <li><span class="num">9</span><span><code>persist</code> writes the assistant message to <code>trip_chatPersistence</code> and spawns a background thread that extracts new long-term preferences. Subprocess exits; the UI renders the chat reply on the right and the “Agent's Recommended Trip” card on the left.</span></li>
+        </ol>
+      </div>
+    </header>
+
+    <!-- =================== 1. MENTAL MODEL =================== -->
+    <section id="mental-model">
+      <h2><span class="num">01</span> The 30-second mental model</h2>
+      <p class="sub">
+        Why use AI <em>agents</em> for this at all, rather than a search form and some Python?
+      </p>
+
+      <p>
+        A travel request like <em>"I want to fly Doha → Athens in March, a quiet riverside hotel with a bar, and a manual Kia"</em>
+        is hard to parse with regex. The hard parts aren't searching MongoDB — those are easy once you know the filters.
+        The hard parts are:
+      </p>
+      <ul>
+        <li><b>Understanding intent.</b> Does the user want a flight only? Or a full trip? Are they asking, or booking?</li>
+        <li><b>Deciding which searches to run.</b> Skipping unrelated categories matters (don't search hotels when they only asked for a car).</li>
+        <li><b>Translating fuzzy descriptions</b> ("quiet riverside hotel with a bar") into something the database can match — that's where <b>vector search</b> over embedded descriptions earns its keep.</li>
+        <li><b>Composing a coherent answer</b> across the results: "here's a bundle, total €842, here's why I picked it."</li>
+      </ul>
+
+      <p>
+        The pattern is: <b>an LLM decides <em>what</em> to do; deterministic Python decides <em>how</em></b>.
+        The LLM is treated as a planner and writer; concrete tools (vector search, MongoDB reads, embedding calls)
+        are plain Python functions. We never let the model invent inventory, and we never ask Python to interpret prose.
+      </p>
+
+      <div class="callout">
+        <strong>One-line summary.</strong> <code>trip_agents</code> is an LLM-driven dispatcher
+        (the <b>orchestrator</b>) that calls three small specialist agents (flight, hotel, car), each of
+        which runs an embedding + a MongoDB vector search, then a second LLM pass that turns the
+        combined results into a friendly reply and a proposed bundle.
+      </div>
+    </section>
+
+    <!-- =================== 2. PRIMER =================== -->
+    <section id="primer">
+      <h2><span class="num">02</span> Agentic AI primer</h2>
+      <p class="sub">
+        Six terms you'll see throughout this document. Each is defined plainly, then anchored to <code>trip_agents</code>.
+      </p>
+
+      <div class="grid-2">
+        <div class="term">
+          <div class="name">LLM (Large Language Model)</div>
+          <div class="body">A network — Claude, GPT-4, Gemini, etc. — that, given a text prompt, returns more text. From your perspective, it's a stateless function: <code>llm.invoke(prompt) → string</code>. It can be wrong, slow, or temporarily unavailable, so you treat it like an unreliable remote service.</div>
+          <div class="example"><b>Here:</b> <code>shared/llm.py</code> wraps Claude / Gemini / OpenAI / DeepSeek / Groq behind a single <code>get_llm().invoke()</code> with 3× retry and a 30 s timeout.</div>
+        </div>
+
+        <div class="term">
+          <div class="name">Agent</div>
+          <div class="body">A loop around an LLM that lets it <em>do</em> things, not just talk. The minimum recipe is: <em>(1) call the LLM with the user's request, (2) interpret its output, (3) optionally run code on the LLM's behalf, (4) feed the result back into the LLM for the next step.</em> The "agency" is in step 3 — the model can affect the outside world.</div>
+          <div class="example"><b>Here:</b> the <b>orchestrator</b> is an agent. It asks the LLM what to do, then runs the requested searches, then asks the LLM to write a reply over the results.</div>
+        </div>
+
+        <div class="term">
+          <div class="name">Tool / function-calling</div>
+          <div class="body">A tool is a regular function exposed to the agent under a stable name (<code>search_flights</code>) with a documented input schema. The LLM doesn't run the function — it just emits "call <code>search_flights</code> with these arguments." Your code runs it, then hands the result back to the LLM.</div>
+          <div class="example"><b>Here:</b> tools are plain Python in <code>orchestrator/tools.py</code> — no LangChain decorators. The plan prompt describes them; <code>execute_tool_calls()</code> dispatches them.</div>
+        </div>
+
+        <div class="term">
+          <div class="name">Orchestration</div>
+          <div class="body">The control flow that sequences LLM calls and tool calls into a useful pipeline: "plan, then execute tools, then maybe retry, then summarise, then save." It's literally a state machine — and that's exactly what LangGraph encodes.</div>
+          <div class="example"><b>Here:</b> a five-node LangGraph: <code>plan → execute → (replan?) → synthesize → persist</code>. Edges are deterministic Python predicates, not LLM decisions.</div>
+        </div>
+
+        <div class="term">
+          <div class="name">Memory</div>
+          <div class="body">LLMs are stateless. Anything the agent should "remember" — the last few messages, the user's preferences — has to be re-injected into every prompt. Memory is a storage strategy plus a retrieval strategy, not a model feature.</div>
+          <div class="example"><b>Here:</b> <b>short-term</b> = last 8 messages in <code>trip_chatPersistence</code>; <b>long-term</b> = up to 30 extracted preference facts in <code>trip_longMemory</code>, learned in a background thread.</div>
+        </div>
+
+        <div class="term">
+          <div class="name">Multi-agent system</div>
+          <div class="body">When one "big" agent would become unwieldy, you split it into smaller agents that each own a narrow job, and have a parent agent (an <em>orchestrator</em>) coordinate them. Smaller surface area, smaller prompts, easier to reason about, and embarrassingly parallel.</div>
+          <div class="example"><b>Here:</b> the orchestrator delegates each domain to its own LangGraph — <code>agent_flight</code>, <code>agent_hotel</code>, <code>agent_car</code> — and runs them concurrently when the plan asks for several.</div>
+        </div>
+      </div>
+
+      <h3>Two more terms worth knowing</h3>
+      <div class="grid-2">
+        <div class="term">
+          <div class="name">Embeddings &amp; vector search</div>
+          <div class="body">An <b>embedding</b> turns a piece of text into a fixed-length list of numbers (a vector) such that semantically similar texts have nearby vectors. <b>Vector search</b> finds documents whose embedding is closest to the query embedding — useful when the user's words don't match the database's words but the <em>meaning</em> does.</div>
+          <div class="example"><b>Here:</b> Voyage AI's <code>voyage-3-lite</code> produces 512-dim vectors. MongoDB's <code>$vectorSearch</code> stage finds the closest 100 candidates, keeps the top 3, then exact-match filters (city, stars, fuel type…) narrow further.</div>
+        </div>
+        <div class="term">
+          <div class="name">Plan-and-Execute vs ReAct</div>
+          <div class="body"><b>ReAct</b> is the loop most beginner tutorials show: <em>thought → tool → observation → thought → tool…</em> One tool at a time, each step decided after seeing the previous result. <b>Plan-and-Execute</b> asks the model to produce a small JSON plan up front (<em>which tools, with what arguments</em>), Python runs it, then the model writes the answer. Fewer LLM round-trips, more deterministic execution.</div>
+          <div class="example"><b>Here:</b> we use Plan-and-Execute. The plan is a JSON object the LLM returns once; Python runs all the requested searches (in parallel where possible); a separate "synthesize" LLM call writes the reply over the merged results.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================== 3. ARCHITECTURE =================== -->
+    <section id="architecture">
+      <h2><span class="num">03</span> System architecture</h2>
+      <p class="sub">A layered view from the browser down to MongoDB. The whole thing is one Python process per chat turn — there is no long-running agent service.</p>
+
+      <div class="diagram">
+        <svg viewBox="0 0 760 480" role="img">
+          <!-- Lane: Browser -->
+          <g>
+            <rect x="20" y="20" width="720" height="70" rx="10" fill="#fff" stroke="#e5e1d8"/>
+            <text x="36" y="44" font-size="12" fill="#7a8593" font-weight="700" letter-spacing=".1em">BROWSER</text>
+            <rect x="36" y="50" width="220" height="30" rx="6" fill="#f7e8d2" stroke="#c07a1f"/>
+            <text x="146" y="69" text-anchor="middle" font-size="12" fill="#7a4413">trip_planner.html</text>
+            <rect x="270" y="50" width="220" height="30" rx="6" fill="#f7e8d2" stroke="#c07a1f"/>
+            <text x="380" y="69" text-anchor="middle" font-size="12" fill="#7a4413">trip_reservations.html</text>
+            <rect x="510" y="50" width="210" height="30" rx="6" fill="#f3f1ec" stroke="#7a8593"/>
+            <text x="615" y="69" text-anchor="middle" font-size="12" fill="#4b5560">poll /search-progress</text>
+          </g>
+
+          <!-- arrows -->
+          <path d="M380 90 L380 116" stroke="#7a8593" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <!-- Lane: API -->
+          <g>
+            <rect x="20" y="120" width="720" height="70" rx="10" fill="#fff" stroke="#e5e1d8"/>
+            <text x="36" y="144" font-size="12" fill="#7a8593" font-weight="700" letter-spacing=".1em">API LAYER · FastAPI</text>
+            <rect x="36" y="150" width="320" height="30" rx="6" fill="#e4ecf6" stroke="#2563a8"/>
+            <text x="196" y="169" text-anchor="middle" font-size="12" fill="#14375c">agent_platform/api/routes/trip.py</text>
+            <text x="380" y="170" font-size="11" fill="#7a8593">spawns subprocess with AGENT_ARGS json</text>
+          </g>
+
+          <path d="M380 190 L380 216" stroke="#7a8593" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <!-- Lane: Orchestrator -->
+          <g>
+            <rect x="20" y="220" width="720" height="120" rx="10" fill="#fff" stroke="#1f6f6a"/>
+            <text x="36" y="244" font-size="12" fill="#1f6f6a" font-weight="700" letter-spacing=".1em">ORCHESTRATOR PROCESS · LangGraph</text>
+
+            <rect x="36" y="256" width="180" height="70" rx="8" fill="#cfe7e2" stroke="#1f6f6a"/>
+            <text x="126" y="278" text-anchor="middle" font-size="12" font-weight="700" fill="#0e3633">orchestrator/main.py</text>
+            <text x="126" y="294" text-anchor="middle" font-size="11" fill="#0e3633">mode dispatch</text>
+            <text x="126" y="310" text-anchor="middle" font-size="11" fill="#0e3633">chat / search / reserve</text>
+            <text x="126" y="322" text-anchor="middle" font-size="11" fill="#0e3633">cancel / modify / update</text>
+
+            <rect x="236" y="256" width="220" height="70" rx="8" fill="#1f6f6a"/>
+            <text x="346" y="280" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">plan-and-execute graph</text>
+            <text x="346" y="298" text-anchor="middle" font-size="11" fill="#cfe7e2">plan → execute → synthesize</text>
+            <text x="346" y="314" text-anchor="middle" font-size="11" fill="#cfe7e2">→ persist  (replan loop max 2)</text>
+
+            <rect x="476" y="256" width="240" height="70" rx="8" fill="#f3f1ec" stroke="#7a8593"/>
+            <text x="596" y="278" text-anchor="middle" font-size="12" font-weight="700" fill="#1f2933">tools registry</text>
+            <text x="596" y="295" text-anchor="middle" font-size="11" fill="#4b5560">search_flights · search_hotels</text>
+            <text x="596" y="310" text-anchor="middle" font-size="11" fill="#4b5560">search_cars · get_user_preferences</text>
+            <text x="596" y="324" text-anchor="middle" font-size="11" fill="#4b5560">get_reservation</text>
+          </g>
+
+          <path d="M596 326 L596 360" stroke="#7a8593" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <!-- Lane: Sub-agents (label on its own row above the boxes) -->
+          <g>
+            <rect x="20" y="364" width="720" height="80" rx="10" fill="#fff" stroke="#e5e1d8"/>
+            <text x="36" y="384" font-size="12" fill="#7a8593" font-weight="700" letter-spacing=".1em">SPECIALIST SUB-AGENTS · small LangGraphs</text>
+            <rect x="240" y="400" width="140" height="32" rx="6" fill="#e4ecf6" stroke="#2563a8"/>
+            <text x="310" y="420" text-anchor="middle" font-size="12" fill="#14375c">agent_flight</text>
+            <rect x="390" y="400" width="140" height="32" rx="6" fill="#f7e8d2" stroke="#c07a1f"/>
+            <text x="460" y="420" text-anchor="middle" font-size="12" fill="#7a4413">agent_hotel</text>
+            <rect x="540" y="400" width="140" height="32" rx="6" fill="#e4f0e6" stroke="#2f7d3a"/>
+            <text x="610" y="420" text-anchor="middle" font-size="12" fill="#1f4a2a">agent_car</text>
+          </g>
+
+          <path d="M460 444 L460 456" stroke="#7a8593" stroke-width="1.5" fill="none" marker-end="url(#arr)"/>
+
+          <!-- Lane: Data -->
+          <g>
+            <rect x="20" y="454" width="720" height="22" rx="6" fill="#f3f1ec" stroke="#7a8593"/>
+            <text x="380" y="470" text-anchor="middle" font-size="11" fill="#4b5560">
+              MongoDB @ 127.0.0.1:55440   ·   databases: agent_platform (settings)  +  trip_data (inventory · chat · reservations · vectors)
+            </text>
+          </g>
+
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#7a8593"/>
+            </marker>
+          </defs>
+        </svg>
+        <div class="caption">Five layers — browser, REST API, orchestrator process, specialist sub-agents, MongoDB.</div>
+      </div>
+
+      <h3>What runs where</h3>
+      <table>
+        <thead><tr><th>Layer</th><th>Role</th><th>Tech</th></tr></thead>
+        <tbody>
+          <tr><td><span class="chip ui">UI</span></td><td>Two tabs: Trip Planner (chat + results) and Reservations</td><td>Plain HTML/JS in <code>ui/tabs/</code></td></tr>
+          <tr><td><span class="chip">API</span></td><td>Threads, messages, suggestions, seed, memory, reservations</td><td>FastAPI route <code>agent_platform/api/routes/trip.py</code></td></tr>
+          <tr><td><span class="chip llm">Orchestrator</span></td><td>One Python process spawned per chat turn; runs the LangGraph</td><td><code>orchestrator/main.py</code> + <code>orchestrator/graph.py</code></td></tr>
+          <tr><td><span class="chip tool">Sub-agents</span></td><td>Embed query → MongoDB vector search → top 3 hits</td><td><code>agent_flight</code>, <code>agent_hotel</code>, <code>agent_car</code></td></tr>
+          <tr><td><span class="chip db">Data</span></td><td>Inventory, chat history, reservations, long-term memory, vector indexes</td><td>MongoDB databases <code>agent_platform</code> + <code>trip_data</code></td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>Architectural choice — subprocess per turn.</strong>
+        Each user message triggers a brand-new orchestrator process via the platform's executor; state is rehydrated from MongoDB on the way in and persisted on the way out. The trade-off: cold-start cost (LangGraph compilation, Mongo connection) in exchange for crash isolation, dead-simple deployment, and the ability to swap LLM provider per agent.
+      </div>
+    </section>
+
+    <!-- =================== 4. THE LOOP =================== -->
+    <section id="loop">
+      <h2><span class="num">04</span> The plan-and-execute loop</h2>
+      <p class="sub">The heart of the system: a five-node LangGraph in <code>orchestrator/graph.py</code>.</p>
+
+      <div class="diagram">
+        <svg viewBox="0 0 760 200" role="img">
+          <!-- Nodes -->
+          <g font-size="12" font-weight="700" fill="#fff">
+            <rect x="40"  y="60" width="110" height="50" rx="10" fill="#1f6f6a"/>
+            <text x="95"  y="90" text-anchor="middle">plan</text>
+
+            <rect x="200" y="60" width="130" height="50" rx="10" fill="#1f6f6a"/>
+            <text x="265" y="90" text-anchor="middle">execute_tools</text>
+
+            <rect x="380" y="60" width="120" height="50" rx="10" fill="#1f6f6a"/>
+            <text x="440" y="90" text-anchor="middle">synthesize</text>
+
+            <rect x="540" y="60" width="110" height="50" rx="10" fill="#1f6f6a"/>
+            <text x="595" y="90" text-anchor="middle">persist</text>
+
+            <rect x="680" y="68" width="60" height="34" rx="8" fill="#7a8593"/>
+            <text x="710" y="90" text-anchor="middle">END</text>
+          </g>
+
+          <!-- Happy-path arrows -->
+          <g stroke="#1f6f6a" stroke-width="2" fill="none" marker-end="url(#arr2)">
+            <path d="M150 85 L200 85"/>
+            <path d="M330 85 L380 85"/>
+            <path d="M500 85 L540 85"/>
+            <path d="M650 85 L680 85"/>
+          </g>
+
+          <!-- chat shortcut -->
+          <path d="M95 110 Q 250 175 595 110" stroke="#b65a3a" stroke-dasharray="4 4" stroke-width="1.6" fill="none" marker-end="url(#arr3)"/>
+          <text x="300" y="172" font-size="11" fill="#b65a3a">intent = "chat" — skip tools</text>
+
+          <!-- replan loop -->
+          <path d="M265 60 Q 200 10 95 60" stroke="#c07a1f" stroke-dasharray="6 6" stroke-width="1.8" fill="none" marker-end="url(#arr4)"/>
+          <text x="160" y="20" font-size="11" fill="#c07a1f">replan (max 2)</text>
+
+          <!-- Traveling dot -->
+          <circle r="6" class="flow-dot"/>
+
+          <defs>
+            <marker id="arr2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#1f6f6a"/>
+            </marker>
+            <marker id="arr3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#b65a3a"/>
+            </marker>
+            <marker id="arr4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#c07a1f"/>
+            </marker>
+          </defs>
+        </svg>
+        <div class="caption">Solid path = search/replan. Dashed orange = empty results trigger a replan (capped at 2). Dashed red = pure chat skips tools.</div>
+      </div>
+
+      <h3>Node by node</h3>
+      <table>
+        <thead><tr><th>Node</th><th>Reads</th><th>Writes</th><th>What it does</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="chip llm">plan</span></td>
+            <td>user query, last 8 messages, long-term prefs</td>
+            <td><code>intent</code>, <code>reply?</code>, <code>tool_calls[]</code></td>
+            <td><b>LLM call.</b> Returns a JSON plan: chat (no tools), search (which tools + args), or replan (relax filters).</td>
+          </tr>
+          <tr>
+            <td><span class="chip tool">execute_tools</span></td>
+            <td><code>tool_calls[]</code></td>
+            <td><code>tool_results[]</code>, <code>search_results</code>, <code>tool_trace</code></td>
+            <td><b>Pure Python.</b> Dispatches each call via <code>TOOL_REGISTRY</code>; independent searches fan out in a <code>ThreadPoolExecutor</code>. Each search publishes partials to <code>trip_search_progress</code> so the UI can stream.</td>
+          </tr>
+          <tr>
+            <td><span class="chip">replan_bump</span></td>
+            <td>—</td>
+            <td><code>replan_count++</code></td>
+            <td>Only entered when <em>all</em> invoked search tools returned zero. Increments a counter, then routes back to <b>plan</b> with a "previous results were empty, relax filters" hint.</td>
+          </tr>
+          <tr>
+            <td><span class="chip llm">synthesize</span></td>
+            <td>merged search results, prefs</td>
+            <td><code>reply</code>, <code>proposed_bundle</code></td>
+            <td><b>LLM call.</b> Picks the best flight/hotel/car, writes a one-paragraph reply, and assembles a <code>proposed_bundle</code> with total cost. Heuristic fallback if the LLM fails.</td>
+          </tr>
+          <tr>
+            <td><span class="chip db">persist</span></td>
+            <td>full state</td>
+            <td><code>trip_chatPersistence</code>; spawns memory thread</td>
+            <td>Saves the assistant message (with search results + bundle) to the chat thread, then fires a background thread that asks the LLM to extract any new preferences (<em>"prefers business class"</em>).</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>Why this graph, not a free agent loop?</strong>
+        ReAct-style "let the LLM decide every step" is great when steps are unknown ahead of time.
+        Here, we know there are at most three searches, they're independent, and we never want the model
+        running unbounded tool calls. Plan-and-Execute gives us <em>one</em> LLM decision point, parallel tool execution,
+        and a deterministic finish — measurable, debuggable, cheap.
+      </div>
+
+      <h3>What the plan actually looks like</h3>
+      <p>The <code>plan</code> node returns a JSON object like this:</p>
+<pre><code><span class="tok-c">// LLM output (parsed by shared/json_utils.extract_json)</span>
+{
+  <span class="tok-s">"intent"</span>: <span class="tok-s">"search"</span>,
+  <span class="tok-s">"reply"</span>: <span class="tok-k">null</span>,
+  <span class="tok-s">"tool_calls"</span>: [
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"get_user_preferences"</span>, <span class="tok-s">"args"</span>: {} },
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_flights"</span>,        <span class="tok-s">"args"</span>: { <span class="tok-s">"destination_city"</span>: <span class="tok-s">"Amsterdam"</span> } },
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_hotels"</span>,         <span class="tok-s">"args"</span>: { <span class="tok-s">"city"</span>: <span class="tok-s">"Amsterdam"</span> } },
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_cars"</span>,           <span class="tok-s">"args"</span>: { <span class="tok-s">"pickup_city"</span>: <span class="tok-s">"Amsterdam"</span> } }
+  ]
+}</code></pre>
+      <p>
+        That object is the <em>entire</em> interface between the planning LLM and the rest of the system.
+        The plan prompt (<code>shared/prompts/trip_planner_plan.txt</code>) is a system message that documents the available tools and gives few-shot examples — no SDK-specific "function-calling" feature is used, so any provider works the same way.
+      </p>
+    </section>
+
+    <!-- =================== 5. ORCHESTRATOR DEEP DIVE =================== -->
+    <section id="orchestrator">
+      <h2><span class="num">05</span> Deep dive: the orchestrator</h2>
+      <p class="sub">A LangGraph <code>StateGraph</code> over a typed dict; nodes are plain functions that take a state and return a partial update.</p>
+
+      <h3>The state — one source of truth</h3>
+      <p>
+        Every node in the orchestrator graph reads and writes the same dictionary. LangGraph merges each node's
+        returned partial into the running state, then routes to the next node based on conditional edges.
+      </p>
+
+      <div class="filename">teams/trip_agents/orchestrator/state.py (excerpt)</div>
+<pre><code><span class="tok-k">class</span> <span class="tok-fn">TripAgentState</span>(TypedDict, total=<span class="tok-k">False</span>):
+    <span class="tok-c"># Inputs</span>
+    query:           <span class="tok-fn">str</span>
+    thread_id:       <span class="tok-fn">str</span>
+    chat_history:    <span class="tok-fn">list</span>      <span class="tok-c"># short-term memory (last 8 msgs)</span>
+    mode:            <span class="tok-fn">str</span>       <span class="tok-c"># chat | search | modify | ...</span>
+    reservation_id:  <span class="tok-fn">str</span>
+    reservation:     <span class="tok-fn">dict</span>
+
+    <span class="tok-c"># Filled by plan node</span>
+    plan:            <span class="tok-fn">dict</span>      <span class="tok-c"># raw LLM JSON</span>
+    intent:          <span class="tok-fn">str</span>       <span class="tok-c"># chat | search | replan</span>
+    reply:           <span class="tok-fn">str</span>
+
+    <span class="tok-c"># Filled by execute node</span>
+    tool_results:    <span class="tok-fn">list</span>
+    search_results:  <span class="tok-fn">dict</span>      <span class="tok-c"># {flights:[], hotels:[], cars:[]}</span>
+    tool_trace:      <span class="tok-fn">list</span>
+
+    <span class="tok-c"># Filled by synthesize node</span>
+    proposed_bundle: <span class="tok-fn">dict</span> | <span class="tok-k">None</span>
+
+    <span class="tok-c"># Control</span>
+    replan_count:    <span class="tok-fn">int</span></code></pre>
+
+      <h3>Wiring the graph</h3>
+      <p>If you've never seen LangGraph: a <code>StateGraph</code> is a directed graph where nodes are functions and edges can be conditional (a router function inspects the state and returns the next node's name). Here's the orchestrator's wiring, lightly trimmed:</p>
+
+      <div class="filename">teams/trip_agents/orchestrator/graph.py</div>
+<pre><code>graph = StateGraph(TripAgentState)
+graph.add_node(<span class="tok-s">"plan"</span>,        plan_node)
+graph.add_node(<span class="tok-s">"execute"</span>,     execute_tools_node)
+graph.add_node(<span class="tok-s">"replan_bump"</span>, replan_bump)
+graph.add_node(<span class="tok-s">"synthesize"</span>,  synthesize_node)
+graph.add_node(<span class="tok-s">"persist"</span>,     persist_and_learn)
+
+graph.add_edge(START, <span class="tok-s">"plan"</span>)
+graph.add_conditional_edges(<span class="tok-s">"plan"</span>,    route_after_plan,    {<span class="tok-s">"execute"</span>: <span class="tok-s">"execute"</span>, <span class="tok-s">"persist"</span>: <span class="tok-s">"persist"</span>})
+graph.add_conditional_edges(<span class="tok-s">"execute"</span>, route_after_execute, {<span class="tok-s">"replan"</span>: <span class="tok-s">"replan_bump"</span>, <span class="tok-s">"synthesize"</span>: <span class="tok-s">"synthesize"</span>})
+graph.add_edge(<span class="tok-s">"replan_bump"</span>, <span class="tok-s">"plan"</span>)
+graph.add_edge(<span class="tok-s">"synthesize"</span>,  <span class="tok-s">"persist"</span>)
+graph.add_edge(<span class="tok-s">"persist"</span>,     END)</code></pre>
+
+      <p>The two routers are tiny:</p>
+<pre><code><span class="tok-k">def</span> <span class="tok-fn">route_after_plan</span>(state):
+    <span class="tok-k">return</span> <span class="tok-s">"persist"</span> <span class="tok-k">if</span> state[<span class="tok-s">"intent"</span>] == <span class="tok-s">"chat"</span> <span class="tok-k">else</span> <span class="tok-s">"execute"</span>
+
+<span class="tok-k">def</span> <span class="tok-fn">route_after_execute</span>(state):
+    search_tr = [tr <span class="tok-k">for</span> tr <span class="tok-k">in</span> state[<span class="tok-s">"tool_results"</span>] <span class="tok-k">if</span> tr[<span class="tok-s">"tool"</span>] <span class="tok-k">in</span> SEARCH_TOOLS]
+    empty     = search_tr <span class="tok-k">and</span> all(tr[<span class="tok-s">"count"</span>] == <span class="tok-n">0</span> <span class="tok-k">for</span> tr <span class="tok-k">in</span> search_tr)
+    <span class="tok-k">if</span> empty <span class="tok-k">and</span> state[<span class="tok-s">"replan_count"</span>] &lt; MAX_REPLAN:
+        <span class="tok-k">return</span> <span class="tok-s">"replan"</span>
+    <span class="tok-k">return</span> <span class="tok-s">"synthesize"</span></code></pre>
+
+      <h3>How tools are exposed</h3>
+      <p>Notice there's no <code>@tool</code> decorator and no provider-specific "function definitions." Tools are dict entries — the LLM is told about them in the system prompt, and Python dispatches on the string name.</p>
+
+      <div class="filename">teams/trip_agents/orchestrator/tools.py</div>
+<pre><code>TOOL_REGISTRY: <span class="tok-fn">dict</span>[<span class="tok-fn">str</span>, <span class="tok-fn">Callable</span>[[ToolContext, <span class="tok-fn">dict</span>], <span class="tok-fn">Any</span>]] = {
+    <span class="tok-s">"search_flights"</span>:       search_flights,
+    <span class="tok-s">"search_hotels"</span>:        search_hotels,
+    <span class="tok-s">"search_cars"</span>:          search_cars,
+    <span class="tok-s">"get_user_preferences"</span>: get_user_preferences,
+    <span class="tok-s">"get_reservation"</span>:      get_reservation,
+}
+
+<span class="tok-k">def</span> <span class="tok-fn">search_flights</span>(ctx: ToolContext, args: <span class="tok-fn">dict</span>) -&gt; <span class="tok-fn">list</span>[<span class="tok-fn">dict</span>]:
+    filters = _clean_flight_filters(args)              <span class="tok-c"># allow-list validation</span>
+    results = _run_search_graph(build_flight_graph,    <span class="tok-c"># invoke sub-agent</span>
+                                filters, ctx.query)
+    _publish_partial(ctx.thread_id, <span class="tok-s">"flights"</span>, results)  <span class="tok-c"># stream to UI</span>
+    <span class="tok-k">return</span> results</code></pre>
+
+      <p>Three things are worth noting:</p>
+      <ul>
+        <li><b>Filter sanitisation.</b> The LLM might invent fields. <code>shared/filters.py</code> keeps only the allow-listed keys for each collection — the model can't smuggle a <code>$where</code> into your Mongo query.</li>
+        <li><b>Partial streaming.</b> Each tool writes its results into <code>trip_search_progress</code> keyed by <code>thread_id</code>; the UI polls that document so flights, hotels, and cars appear in the left panel <em>as they finish</em>, not all at once.</li>
+        <li><b>Parallelism.</b> Multiple search tools in one plan fan out via <code>ThreadPoolExecutor</code> (see below).</li>
+      </ul>
+
+      <div class="diagram">
+        <svg viewBox="0 0 760 180" role="img">
+          <rect x="40" y="60" width="160" height="60" rx="10" fill="#1f6f6a"/>
+          <text x="120" y="92" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">execute_tools</text>
+          <text x="120" y="108" text-anchor="middle" font-size="11" fill="#cfe7e2">ThreadPoolExecutor</text>
+
+          <g font-size="12" font-weight="700" fill="#fff">
+            <rect x="260" y="20" width="180" height="40" rx="8" fill="#2563a8"/>
+            <text x="350" y="44" text-anchor="middle">search_flights</text>
+            <rect x="260" y="80" width="180" height="40" rx="8" fill="#c07a1f"/>
+            <text x="350" y="104" text-anchor="middle">search_hotels</text>
+            <rect x="260" y="140" width="180" height="40" rx="8" fill="#2f7d3a"/>
+            <text x="350" y="164" text-anchor="middle">search_cars</text>
+          </g>
+
+          <g stroke="#7a8593" stroke-width="1.6" fill="none" marker-end="url(#arr5)">
+            <path d="M200 75 Q 230 40 260 40"/>
+            <path d="M200 90 L 260 100"/>
+            <path d="M200 105 Q 230 160 260 160"/>
+          </g>
+
+          <g font-size="11" fill="#4b5560">
+            <text x="500" y="44">└→ Voyage embed → $vectorSearch (trip_flights)</text>
+            <text x="500" y="104">└→ Voyage embed → $vectorSearch (trip_hotels)</text>
+            <text x="500" y="164">└→ Voyage embed → $vectorSearch (trip_cars)</text>
+          </g>
+
+          <defs>
+            <marker id="arr5" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#7a8593"/>
+            </marker>
+          </defs>
+        </svg>
+        <div class="caption">Independent search tools fan out in parallel; each merges back into the shared <code>search_results</code> dict.</div>
+      </div>
+    </section>
+
+    <!-- =================== 6. SUB-AGENTS =================== -->
+    <section id="subagents">
+      <h2><span class="num">06</span> Deep dive: the specialist sub-agents</h2>
+      <p class="sub">Three almost-identical mini-agents. Each is two nodes: <em>embed</em> → <em>vector search</em>.</p>
+
+      <p>Every domain (flights, hotels, cars) is its own tiny LangGraph compiled from a shared builder. The same pipeline, parameterised by which MongoDB collection to query:</p>
+
+      <div class="diagram">
+        <svg viewBox="0 0 720 160" role="img">
+          <rect x="60"  y="55" width="170" height="50" rx="10" fill="#fff" stroke="#1f6f6a" stroke-width="2"/>
+          <text x="145" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1f6f6a">embed_query</text>
+          <text x="145" y="96" text-anchor="middle" font-size="11" fill="#4b5560">Voyage AI · 512-d</text>
+
+          <rect x="290" y="55" width="220" height="50" rx="10" fill="#fff" stroke="#1f6f6a" stroke-width="2"/>
+          <text x="400" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#1f6f6a">search_{flights|hotels|cars}</text>
+          <text x="400" y="96" text-anchor="middle" font-size="11" fill="#4b5560">$vectorSearch + filters · top 3</text>
+
+          <rect x="570" y="65" width="80" height="30" rx="8" fill="#7a8593"/>
+          <text x="610" y="85" text-anchor="middle" font-size="12" font-weight="700" fill="#fff">END</text>
+
+          <g stroke="#1f6f6a" stroke-width="2" fill="none" marker-end="url(#arr6)">
+            <path d="M230 80 L290 80"/>
+            <path d="M510 80 L570 80"/>
+          </g>
+
+          <!-- embed error short-circuit -->
+          <path d="M145 105 Q 380 160 610 105" stroke="#b65a3a" stroke-dasharray="4 4" fill="none" marker-end="url(#arr7)"/>
+          <text x="380" y="148" text-anchor="middle" font-size="11" fill="#b65a3a">if embedding fails → END (return empty results)</text>
+
+          <defs>
+            <marker id="arr6" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#1f6f6a"/>
+            </marker>
+            <marker id="arr7" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" fill="#b65a3a"/>
+            </marker>
+          </defs>
+        </svg>
+        <div class="caption">The shape of every search sub-agent.</div>
+      </div>
+
+      <h3>One file is almost the whole agent</h3>
+      <div class="filename">teams/trip_agents/agent_flight/agent.py (whole file)</div>
+<pre><code><span class="tok-k">from</span> agent_flight.state <span class="tok-k">import</span> FlightSearchState
+<span class="tok-k">from</span> shared.atlas <span class="tok-k">import</span> get_flights
+<span class="tok-k">from</span> shared.nodes.search_nodes <span class="tok-k">import</span> make_embed_node, make_vector_search_node
+<span class="tok-k">from</span> shared.search_graph <span class="tok-k">import</span> build_embed_search_graph
+
+_embed  = make_embed_node(<span class="tok-s">"flight"</span>)
+_search = make_vector_search_node(
+    get_flights, <span class="tok-s">"flight"</span>, <span class="tok-s">"trip_flights"</span>,
+    format_hit=<span class="tok-k">lambda</span> _i, r: <span class="tok-fn">f</span><span class="tok-s">"{r['airline']} {r['flight_number']} — EUR{r['price_eur']}"</span>,
+)
+
+<span class="tok-k">def</span> <span class="tok-fn">build_flight_graph</span>():
+    <span class="tok-k">return</span> build_embed_search_graph(FlightSearchState, _embed, _search, <span class="tok-s">"search_flights"</span>)</code></pre>
+
+      <p>
+        That's it. The interesting code lives in the shared factories — <code>make_embed_node</code> and
+        <code>make_vector_search_node</code> in <code>shared/nodes/search_nodes.py</code> — so flight, hotel,
+        and car logic stays identical and bug fixes happen once.
+      </p>
+
+      <h3>The vector-search node, in essence</h3>
+<pre><code><span class="tok-k">def</span> <span class="tok-fn">make_vector_search_node</span>(collection_getter, label, collection_name, format_hit=<span class="tok-k">None</span>):
+    <span class="tok-k">def</span> <span class="tok-fn">search</span>(state):
+        embedding = state[<span class="tok-s">"query_embedding"</span>]
+        filters   = state.get(<span class="tok-s">"filters"</span>, {})
+        results   = vector_search(collection_getter(), embedding,
+                                  limit=<span class="tok-n">3</span>, filters=filters)
+        <span class="tok-k">return</span> {<span class="tok-s">"results"</span>: results, <span class="tok-s">"status"</span>: <span class="tok-s">"complete"</span>}
+    <span class="tok-k">return</span> search</code></pre>
+
+      <p>Inside <code>vector_search()</code> the actual MongoDB pipeline looks like this:</p>
+<pre><code>pipeline = [
+    {<span class="tok-s">"$vectorSearch"</span>: {
+        <span class="tok-s">"index"</span>:        <span class="tok-s">"vector_index"</span>,
+        <span class="tok-s">"path"</span>:         <span class="tok-s">"embedded_description"</span>,
+        <span class="tok-s">"queryVector"</span>:  embedding,           <span class="tok-c"># 512 floats from Voyage</span>
+        <span class="tok-s">"numCandidates"</span>: <span class="tok-n">100</span>,
+        <span class="tok-s">"limit"</span>:         <span class="tok-n">3</span>,
+        <span class="tok-s">"filter"</span>:        filters,            <span class="tok-c"># {city: "Amsterdam", stars: {$gte: 4}}</span>
+    }},
+    {<span class="tok-s">"$project"</span>: { <span class="tok-s">"embedded_description"</span>: <span class="tok-n">0</span>,
+                  <span class="tok-s">"score"</span>: {<span class="tok-s">"$meta"</span>: <span class="tok-s">"vectorSearchScore"</span>} }},
+]
+results = <span class="tok-fn">list</span>(collection.aggregate(pipeline))</code></pre>
+
+      <p>Each collection has its own allow-list of filter fields — sanity defaults for the architect:</p>
+      <table>
+        <thead><tr><th>Collection</th><th>Filterable fields</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td><code>trip_flights</code></td><td><code>origin_city</code>, <code>destination_city</code>, <code>travel_class</code></td><td>Origin/destination are exact-match constraints — semantic search can't be trusted for "Tokyo vs Toronto."</td></tr>
+          <tr><td><code>trip_hotels</code></td><td><code>city</code>, <code>stars</code> (<code>$gte</code>)</td><td>City must match; stars is an inequality, allowing room for upgrades.</td></tr>
+          <tr><td><code>trip_cars</code></td><td><code>pickup_city</code>, <code>make</code>, <code>category</code>, <code>color</code>, <code>transmission</code>, <code>fuel_type</code></td><td>More structured filters available — vector search refines within the slot.</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- =================== 7. MEMORY =================== -->
+    <section id="memory">
+      <h2><span class="num">07</span> Deep dive: memory</h2>
+      <p class="sub">LLMs are stateless. Anything you want the agent to "remember" you have to fetch and put back into the prompt.</p>
+
+      <div class="diagram">
+        <svg viewBox="0 0 760 240" role="img">
+          <!-- Short term -->
+          <rect x="40" y="30" width="320" height="180" rx="12" fill="#fff" stroke="#2563a8" stroke-width="2"/>
+          <text x="56" y="56" font-size="12" font-weight="700" fill="#2563a8">SHORT-TERM · per thread</text>
+          <text x="56" y="78" font-size="13" fill="#1f2933">trip_chatPersistence</text>
+          <text x="56" y="98" font-size="12" fill="#4b5560">Last 8 messages, raw, injected as</text>
+          <text x="56" y="114" font-size="12" fill="#4b5560">"Conversation so far:" in plan prompt.</text>
+          <text x="56" y="142" font-size="12" fill="#4b5560">→ Read at the start of every turn.</text>
+          <text x="56" y="160" font-size="12" fill="#4b5560">→ Appended after persist.</text>
+          <text x="56" y="178" font-size="12" fill="#4b5560">→ Lost when thread is deleted.</text>
+
+          <!-- Long term -->
+          <rect x="400" y="30" width="320" height="180" rx="12" fill="#fff" stroke="#1f6f6a" stroke-width="2"/>
+          <text x="416" y="56" font-size="12" font-weight="700" fill="#1f6f6a">LONG-TERM · per agent</text>
+          <text x="416" y="78" font-size="13" fill="#1f2933">trip_longMemory</text>
+          <text x="416" y="98" font-size="12" fill="#4b5560">Up to 30 extracted facts:</text>
+          <text x="416" y="114" font-size="12" fill="#4b5560">"prefers business class", "avoids diesel".</text>
+          <text x="416" y="142" font-size="12" fill="#4b5560">→ Background LLM call after each turn.</text>
+          <text x="416" y="160" font-size="12" fill="#4b5560">→ Injected into plan prompt.</text>
+          <text x="416" y="178" font-size="12" fill="#4b5560">→ User can clear from UI.</text>
+        </svg>
+        <div class="caption">Two storage strategies in two MongoDB collections; both flow back into the plan prompt at the start of every turn.</div>
+      </div>
+
+      <h3>Short-term: replay the last few messages</h3>
+      <p>
+        Before each <code>plan</code> call, the orchestrator pulls the last 8 messages from <code>trip_chatPersistence</code>
+        and formats them as plain text in the user prompt:
+      </p>
+<pre><code>Conversation so far:
+  USER: Find me a flight to Tokyo next month
+  ASSISTANT: Sure — economy or business?
+  USER: Business please
+
+Latest user message: <span class="tok-s">"And add a 4-star hotel near Shinjuku"</span>
+
+Return JSON only:</code></pre>
+      <p>
+        That's how the LLM "knows" the city is Tokyo and the class is business when answering the new turn —
+        not through any internal memory, just because we put it back in the prompt.
+      </p>
+
+      <h3>Long-term: extract preferences in the background</h3>
+      <p>
+        After every assistant turn, <code>persist_and_learn</code> spawns a background thread that runs a
+        separate LLM call (<code>memory_extraction.txt</code>) over the new dialogue. If the model finds a
+        durable preference — <em>"prefers business class"</em>, <em>"avoids diesel cars"</em> — it's upserted
+        into <code>trip_longMemory</code>, capped at 30 entries per agent.
+      </p>
+      <p>
+        On the next turn, <code>load_preferences()</code> reads those facts and appends them to the system prompt:
+      </p>
+<pre><code>User preferences:
+- Prefers business class on long-haul flights
+- Avoids diesel rental cars
+- Likes hotels with a bar and river view</code></pre>
+      <p>
+        The user-visible effect: the agent gets better at the user's quirks over many sessions
+        without you ever fine-tuning a model.
+      </p>
+    </section>
+
+    <!-- =================== 8. MODES =================== -->
+    <section id="modes">
+      <h2><span class="num">08</span> Modes beyond chat</h2>
+      <p class="sub">A single subprocess entry point handles six operations, switched by <code>AGENT_ARGS.mode</code>.</p>
+
+      <p>The API picks the mode <em>before</em> spawning the orchestrator, using simple regex + keyword heuristics (<code>_detect_message_mode</code> in <code>agent_platform/api/routes/trip.py</code>):</p>
+
+      <table>
+        <thead><tr><th>Mode</th><th>How it's triggered</th><th>What the orchestrator does</th></tr></thead>
+        <tbody>
+          <tr><td><code>chat</code></td><td>Default — any normal message</td><td>Full plan-and-execute graph (the one diagrammed above).</td></tr>
+          <tr><td><code>search</code></td><td>Stateless "Run" modal, no chat thread</td><td>Same graph, but skips chat persistence.</td></tr>
+          <tr><td><code>reserve</code></td><td>UI sends a magic prefix <code>__RESERVE__{json}</code> when the user confirms a bundle</td><td>Single-node reserve graph — assigns <code>TRIP-YYYYMMDD-XXXX</code>, computes total, writes to <code>trip_reservations</code>.</td></tr>
+          <tr><td><code>cancel</code></td><td>Message contains <code>TRIP-…</code> + a cancel keyword</td><td>Looks up + deletes the reservation document, writes a confirmation chat message.</td></tr>
+          <tr><td><code>modify</code></td><td>Message contains <code>TRIP-…</code> + a change keyword</td><td>Plan-and-execute in modify mode — searches only one category and stores results as "replacement candidates."</td></tr>
+          <tr><td><code>update</code></td><td>UI sends <code>__UPDATE__{json}</code> after the user picks a replacement card</td><td>Patches the reservation document with the new item and re-computes the total.</td></tr>
+        </tbody>
+      </table>
+
+      <div class="callout">
+        <strong>Why this isn't just one big mode.</strong>
+        Confirming a reservation and cancelling one are deterministic database operations — no LLM should be in that loop. Putting them in separate "single-node graphs" reuses LangGraph state plumbing without paying the cost of a plan/synthesize round trip. The LLM only intervenes when the work is genuinely linguistic (parsing a search request, picking the best bundle).
+      </div>
+    </section>
+
+    <!-- =================== 9. WALKTHROUGH =================== -->
+    <section id="walkthrough">
+      <h2><span class="num">09</span> Worked walkthrough</h2>
+      <p class="sub">User types: <em>"Plan a full trip to Amsterdam — flight, hotel and car"</em>. Here is every step, in order.</p>
+
+      <ol class="timeline">
+        <li class="is-ui">
+          <div class="when">t = 0 ms</div>
+          <div class="what">Browser → API</div>
+          <div class="body">
+            <code>trip_planner.html</code> POSTs to
+            <code>/api/trip/{agent_id}/threads/{tid}/messages</code> with <code>{ "message": "Plan a full trip to Amsterdam — flight, hotel and car" }</code>.
+            The user message is appended to <code>trip_chatPersistence</code> immediately so it's visible in the thread.
+          </div>
+        </li>
+
+        <li>
+          <div class="when">t ≈ 20 ms</div>
+          <div class="what">API decides the mode</div>
+          <div class="body">
+            <code>_detect_message_mode</code> checks for magic prefixes (none), then for a reservation ID + cancel/modify keywords (none), so <code>mode = "chat"</code>. The route spawns an orchestrator subprocess with <code>AGENT_ARGS</code> JSON containing <code>mode</code>, <code>thread_id</code>, <code>message</code>, and the recent <code>chat_history</code>.
+          </div>
+        </li>
+
+        <li class="is-llm">
+          <div class="when">t ≈ 0.6 s</div>
+          <div class="what">plan node — LLM call #1</div>
+          <div class="body">
+            The orchestrator loads long-term prefs (<em>"prefers business class"</em>), assembles the system prompt from <code>trip_planner_plan.txt</code>, and calls <code>llm.invoke()</code>. The LLM returns:
+<pre><code>{
+  <span class="tok-s">"intent"</span>: <span class="tok-s">"search"</span>,
+  <span class="tok-s">"tool_calls"</span>: [
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"get_user_preferences"</span>, <span class="tok-s">"args"</span>: {} },
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_flights"</span>,       <span class="tok-s">"args"</span>: { <span class="tok-s">"destination_city"</span>: <span class="tok-s">"Amsterdam"</span>, <span class="tok-s">"travel_class"</span>: <span class="tok-s">"business"</span> } },
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_hotels"</span>,        <span class="tok-s">"args"</span>: { <span class="tok-s">"city"</span>: <span class="tok-s">"Amsterdam"</span> } },
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_cars"</span>,          <span class="tok-s">"args"</span>: { <span class="tok-s">"pickup_city"</span>: <span class="tok-s">"Amsterdam"</span> } }
+  ]
+}</code></pre>
+            Notice the long-term preference quietly raised <code>travel_class</code> to <code>business</code>.
+          </div>
+        </li>
+
+        <li class="is-tool">
+          <div class="when">t ≈ 0.7 s</div>
+          <div class="what">execute_tools — fan out</div>
+          <div class="body">
+            <code>execute_tool_calls()</code> runs <code>get_user_preferences</code> synchronously (cheap, no I/O), then submits <code>search_flights</code>, <code>search_hotels</code>, <code>search_cars</code> to a <code>ThreadPoolExecutor(max_workers=3)</code>. Each runs its own compiled sub-agent graph.
+          </div>
+        </li>
+
+        <li class="is-db">
+          <div class="when">t ≈ 0.9 s</div>
+          <div class="what">3 × Voyage embed in parallel</div>
+          <div class="body">
+            Each sub-agent's <code>embed_query</code> node calls Voyage AI with the user's full sentence — same text, three calls, since the embedding cache is per-agent. Each returns a 512-float vector.
+          </div>
+        </li>
+
+        <li class="is-db">
+          <div class="when">t ≈ 1.2 s</div>
+          <div class="what">3 × MongoDB $vectorSearch</div>
+          <div class="body">
+            Each sub-agent runs <code>vector_search()</code> against its collection — flights → <code>trip_flights</code>, hotels → <code>trip_hotels</code>, cars → <code>trip_cars</code> — with the filters from the plan and a per-collection allow-list.
+            Each returns the top 3 hits with a similarity <code>score</code>.
+          </div>
+        </li>
+
+        <li class="is-tool">
+          <div class="when">t ≈ 1.3 s (streaming)</div>
+          <div class="what">Partial results published to the UI</div>
+          <div class="body">
+            As each sub-agent finishes, <code>_publish_partial</code> upserts its results into the
+            <code>trip_search_progress</code> document keyed by <code>thread_id</code>. The browser is polling
+            <code>GET /threads/{tid}/search-progress</code> every second and renders cards in the left panel <em>as they arrive</em>.
+            If Voyage is slow but Mongo is fast, hotels might land before flights — that's fine, the UI doesn't care about order.
+          </div>
+        </li>
+
+        <li class="is-llm">
+          <div class="when">t ≈ 2.0 s</div>
+          <div class="what">synthesize node — LLM call #2</div>
+          <div class="body">
+            <p style="margin:0 0 8px"><b>What gets sent.</b> Two strings are handed to the LLM — a <em>system</em> message and a <em>user</em> message. The orchestrator assembles both inside <code>synthesize_node</code>:</p>
+
+            <p style="margin:14px 0 4px"><b>1. System message</b> — the <code>trip_planner_synthesize.txt</code> prompt, optionally followed by the agent's long-term preferences (from <code>trip_longMemory</code>, the same ones the plan node also injected):</p>
+<pre><code>You are a trip booking assistant synthesizing search results for the user.
+
+Given the user's request, tool results, and optional user preferences,
+return ONLY a JSON object:
+
+{
+  <span class="tok-s">"content"</span>: <span class="tok-s">"Natural conversational summary for the user (2-4 sentences)"</span>,
+  <span class="tok-s">"search_results"</span>: { <span class="tok-s">"flights"</span>: [...], <span class="tok-s">"hotels"</span>: [...], <span class="tok-s">"cars"</span>: [...] },
+  <span class="tok-s">"proposed_bundle"</span>: {
+    <span class="tok-s">"flight"</span>: {...} | <span class="tok-k">null</span>,
+    <span class="tok-s">"hotel"</span>:  {...} | <span class="tok-k">null</span>,
+    <span class="tok-s">"car"</span>:    {...} | <span class="tok-k">null</span>,
+    <span class="tok-s">"rationale"</span>:      <span class="tok-s">"Why this combination fits the user"</span>,
+    <span class="tok-s">"total_cost_eur"</span>: <span class="tok-n">0</span>
+  }
+}
+
+Rules:
+1. Include in search_results ALL options returned by tools.
+2. proposed_bundle picks your best recommendation — null for empty categories.
+3. total_cost_eur = flight + hotel*7 + car*7 (7 nights/days if unknown).
+4. Never say the booking is confirmed.
+5. If no results at all, set proposed_bundle to null.
+6. Reference user preferences when a result matches them.
+
+<span class="tok-c">--- (appended only if long-term memory exists) ---</span>
+User preferences:
+- Prefers business class on long-haul flights
+- Avoids diesel rental cars
+- Likes hotels with a bar and river view</code></pre>
+
+            <p style="margin:14px 0 4px"><b>2. User message</b> — the literal user query plus a JSON dump of everything the search step produced, capped at 6,000 characters. The payload is built like this:</p>
+<pre><code>payload = {
+  <span class="tok-s">"user_query"</span>: <span class="tok-s">"Plan a full trip to Amsterdam — flight, hotel and car"</span>,
+  <span class="tok-s">"search_results"</span>: {                       <span class="tok-c"># full docs from each sub-agent</span>
+    <span class="tok-s">"flights"</span>: [ {<span class="tok-s">"airline"</span>: <span class="tok-s">"KLM"</span>, <span class="tok-s">"flight_number"</span>: <span class="tok-s">"KL1234"</span>,
+                  <span class="tok-s">"origin_city"</span>: <span class="tok-s">"Doha"</span>, <span class="tok-s">"destination_city"</span>: <span class="tok-s">"Amsterdam"</span>,
+                  <span class="tok-s">"travel_class"</span>: <span class="tok-s">"business"</span>, <span class="tok-s">"price_eur"</span>: <span class="tok-n">540</span>,
+                  <span class="tok-s">"score"</span>: <span class="tok-n">0.91</span>}, <span class="tok-c">/* +2 more */</span> ],
+    <span class="tok-s">"hotels"</span>:  [ {<span class="tok-s">"name"</span>: <span class="tok-s">"Hotel Pulitzer"</span>, <span class="tok-s">"city"</span>: <span class="tok-s">"Amsterdam"</span>, <span class="tok-s">"stars"</span>: <span class="tok-n">4</span>,
+                  <span class="tok-s">"price_per_night_eur"</span>: <span class="tok-n">220</span>, <span class="tok-s">"score"</span>: <span class="tok-n">0.88</span>}, <span class="tok-c">/* +2 */</span> ],
+    <span class="tok-s">"cars"</span>:    [ {<span class="tok-s">"make"</span>: <span class="tok-s">"Volkswagen"</span>, <span class="tok-s">"model"</span>: <span class="tok-s">"Polo"</span>, <span class="tok-s">"transmission"</span>: <span class="tok-s">"manual"</span>,
+                  <span class="tok-s">"price_per_day_eur"</span>: <span class="tok-n">42</span>, <span class="tok-s">"score"</span>: <span class="tok-n">0.84</span>}, <span class="tok-c">/* +2 */</span> ]
+  },
+  <span class="tok-s">"tool_results_summary"</span>: [           <span class="tok-c"># compact recap — which tools ran, how many hits</span>
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_flights"</span>, <span class="tok-s">"count"</span>: <span class="tok-n">3</span> },
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_hotels"</span>,  <span class="tok-s">"count"</span>: <span class="tok-n">3</span> },
+    { <span class="tok-s">"tool"</span>: <span class="tok-s">"search_cars"</span>,    <span class="tok-s">"count"</span>: <span class="tok-n">3</span> }
+  ]
+  <span class="tok-c"># In modify mode three extra fields are added:</span>
+  <span class="tok-c">#   "modify_mode": True, "reservation_id": "TRIP-...", "category": "hotel"</span>
+}
+
+prompt = <span class="tok-fn">f</span><span class="tok-s">"User request: {query}\n\nData:\n{json.dumps(payload)[:6000]}\n\nReturn JSON only."</span></code></pre>
+
+            <p style="margin:14px 0 4px"><b>Why this shape.</b> Three deliberate choices:</p>
+            <ul style="margin:0 0 12px 18px; padding:0; color:var(--ink-soft); font-size:14.5px;">
+              <li><b>Full docs in <code>search_results</code></b> — so the model can quote real airline names, hotel names, and prices instead of inventing them.</li>
+              <li><b>Tiny <code>tool_results_summary</code></b> — gives the model a quick at-a-glance "how many of each did I get" without making it re-count arrays.</li>
+              <li><b>6,000-character cap</b> — guards against blowing the context window if a category returned unusually long descriptions; top results are kept since arrays are already trimmed to 3 by each sub-agent.</li>
+            </ul>
+
+            <p style="margin:8px 0 4px"><b>What comes back.</b> The model returns a single JSON object — parsed by <code>shared.json_utils.extract_json</code> — with two fields the orchestrator cares about (<code>content</code> and <code>proposed_bundle</code>):</p>
+<pre><code>{
+  <span class="tok-s">"content"</span>: <span class="tok-s">"I found a great Amsterdam package. The KLM 6 AM business flight is the cheapest non-stop; the Hotel Pulitzer is a quiet 4★ near the canals; and a manual Volkswagen Polo covers the city. Total around €842."</span>,
+  <span class="tok-s">"proposed_bundle"</span>: {
+    <span class="tok-s">"flight"</span>: { <span class="tok-s">"airline"</span>: <span class="tok-s">"KLM"</span>, <span class="tok-s">"flight_number"</span>: <span class="tok-s">"KL1234"</span>, <span class="tok-s">"price_eur"</span>: <span class="tok-n">540</span> },
+    <span class="tok-s">"hotel"</span>:  { <span class="tok-s">"name"</span>: <span class="tok-s">"Hotel Pulitzer"</span>, <span class="tok-s">"stars"</span>: <span class="tok-n">4</span>, <span class="tok-s">"price_per_night_eur"</span>: <span class="tok-n">220</span> },
+    <span class="tok-s">"car"</span>:    { <span class="tok-s">"make"</span>: <span class="tok-s">"Volkswagen"</span>, <span class="tok-s">"model"</span>: <span class="tok-s">"Polo"</span>, <span class="tok-s">"transmission"</span>: <span class="tok-s">"manual"</span>, <span class="tok-s">"price_per_day_eur"</span>: <span class="tok-n">42</span> },
+    <span class="tok-s">"rationale"</span>:    <span class="tok-s">"Best price · matches business + city preference."</span>,
+    <span class="tok-s">"total_cost_eur"</span>: <span class="tok-n">842.0</span>
+  }
+}</code></pre>
+            <p style="margin:8px 0 0"><b>Where each output lands in the UI.</b> <code>content</code> becomes the assistant's chat bubble on the right; <code>proposed_bundle</code> is rendered on the left as the <em>"Agent's Recommended Trip"</em> card with the <em>Confirm Booking</em> / <em>Search Alternatives</em> buttons. If the LLM call fails or returns malformed JSON, a deterministic fallback in <code>synthesize_node</code> assembles a bundle from the top hit of each category — the user never sees a blank reply.</p>
+          </div>
+        </li>
+
+        <li class="is-db">
+          <div class="when">t ≈ 2.1 s</div>
+          <div class="what">persist + spawn memory thread</div>
+          <div class="body">
+            The assistant message — text reply, search results, and the proposed bundle — is appended to <code>trip_chatPersistence</code>. A daemon thread is started that calls the LLM one more time over the new dialogue to extract any new preference facts and upsert them into <code>trip_longMemory</code>. This is fire-and-forget; the user response does not wait for it.
+          </div>
+        </li>
+
+        <li class="is-ui">
+          <div class="when">t ≈ 2.1 s</div>
+          <div class="what">Subprocess prints the JSON envelope, exits</div>
+          <div class="body">
+            Final line on stdout: <code>__RESULT_JSON__:{...}</code>. The API parses that line, marks the run as complete, and the browser — which was polling thread state — renders the assistant message and the bundle's "Confirm reservation" button.
+          </div>
+        </li>
+
+        <li class="is-ui">
+          <div class="when">t = user clicks Confirm</div>
+          <div class="what">Reserve mode</div>
+          <div class="body">
+            The UI POSTs <code>__RESERVE__{...}</code> as the next message. The API spawns the orchestrator again with <code>mode=reserve</code>; it runs the single-node reserve graph, mints <code>TRIP-20260525-7K9F</code>, and inserts the reservation document. No LLM involved — pure database write.
+          </div>
+        </li>
+      </ol>
+
+      <div class="callout">
+        <strong>Cost &amp; latency, at a glance.</strong>
+        Two LLM calls per chat turn (plan + synthesize), plus one in the background for memory.
+        The fan-out keeps end-to-end wall time near <em>max(embed + vector search)</em>, not the sum.
+        Each turn is a fresh subprocess, so a stuck LLM provider can never lock up the platform.
+      </div>
+    </section>
+
+    <!-- =================== 10. GLOSSARY =================== -->
+    <section id="glossary">
+      <h2><span class="num">10</span> Glossary &amp; source map</h2>
+      <p class="sub">A pocket reference for terms used in this document and where to find the corresponding code.</p>
+
+      <h3>Cheat sheet</h3>
+      <div class="grid-3">
+        <div class="term"><div class="name">Agent</div><div class="body">An LLM wrapped in a loop that can call tools.</div></div>
+        <div class="term"><div class="name">Tool</div><div class="body">A named function the agent can request by emitting JSON.</div></div>
+        <div class="term"><div class="name">Plan-and-Execute</div><div class="body">LLM emits a full plan once; Python runs it; LLM writes the answer.</div></div>
+        <div class="term"><div class="name">Orchestrator</div><div class="body">The agent that sequences other agents.</div></div>
+        <div class="term"><div class="name">Sub-agent</div><div class="body">A small specialist agent the orchestrator delegates to.</div></div>
+        <div class="term"><div class="name">LangGraph</div><div class="body">A library for building stateful node-and-edge agent graphs.</div></div>
+        <div class="term"><div class="name">Embedding</div><div class="body">A vector representation of text used for similarity search.</div></div>
+        <div class="term"><div class="name">$vectorSearch</div><div class="body">MongoDB Atlas aggregation stage that finds the closest vectors.</div></div>
+        <div class="term"><div class="name">Short-term memory</div><div class="body">Recent dialogue replayed into the prompt.</div></div>
+        <div class="term"><div class="name">Long-term memory</div><div class="body">Extracted user facts stored across sessions.</div></div>
+        <div class="term"><div class="name">ReAct</div><div class="body">Alternative loop: one tool call at a time, decided iteratively.</div></div>
+        <div class="term"><div class="name">Subprocess-per-turn</div><div class="body">A fresh Python process handles each chat message — crash isolation, no shared state.</div></div>
+      </div>
+
+      <h3>Where to find what in the repository</h3>
+      <table>
+        <thead><tr><th>If you want to…</th><th>Open this file</th></tr></thead>
+        <tbody>
+          <tr><td>Understand the plan-and-execute graph</td><td><code>orchestrator/graph.py</code></td></tr>
+          <tr><td>Add or modify a tool</td><td><code>orchestrator/tools.py</code> + <code>shared/filters.py</code></td></tr>
+          <tr><td>Change the planner's behaviour</td><td><code>shared/prompts/trip_planner_plan.txt</code></td></tr>
+          <tr><td>Change how results are summarised</td><td><code>shared/prompts/trip_planner_synthesize.txt</code></td></tr>
+          <tr><td>Tweak preference extraction</td><td><code>shared/prompts/memory_extraction.txt</code> + <code>shared/memory.py</code></td></tr>
+          <tr><td>Add a new specialist agent</td><td>Mirror <code>agent_flight/</code>; add to <code>TOOL_REGISTRY</code>.</td></tr>
+          <tr><td>Tune vector search</td><td><code>shared/atlas.py</code> (<code>vector_search</code>) and the Atlas vector index definitions.</td></tr>
+          <tr><td>Add a new mode</td><td><code>orchestrator/main.py</code> (dispatch) + new graph in <code>orchestrator/graph.py</code>.</td></tr>
+          <tr><td>Swap the LLM provider</td><td><code>shared/llm.py</code> + agent Settings tab.</td></tr>
+        </tbody>
+      </table>
+
+      <footer>
+        Source of truth for everything above:
+        <code>teams/trip_agents/</code> in this repository.
+        For a deeper README aimed at deployers, see <code>teams/trip_agents/README.md</code>.
+      </footer>
+    </section>
+  </main>
+</div>
+
+<script>
+  // Highlight the current TOC entry while scrolling.
+  (function () {
+    const sections = Array.from(document.querySelectorAll('main section[id]'));
+    const links = new Map();
+    document.querySelectorAll('.toc a').forEach(a => {
+      const id = a.getAttribute('href').slice(1);
+      links.set(id, a);
+    });
+
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        const id = entry.target.id;
+        const link = links.get(id);
+        if (!link) return;
+        if (entry.isIntersecting) {
+          links.forEach(l => l.classList.remove('active'));
+          link.classList.add('active');
+        }
+      });
+    }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+
+    sections.forEach(s => observer.observe(s));
+  })();
+</script>
+</body>
+</html>
