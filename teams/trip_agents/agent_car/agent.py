@@ -1,27 +1,21 @@
-"""LangGraph StateGraph definition for the Car Rental Search agent.
-
-Graph: embed_query --(status ok)--> search_cars --> END
-                   --(status error)--> END
-"""
-
-from langgraph.graph import StateGraph, END
+"""LangGraph StateGraph definition for the Car Search agent."""
 
 from agent_car.state import CarSearchState
-from agent_car.nodes.embed_query import embed_query
-from agent_car.nodes.search_cars import search_cars
+from shared.atlas import get_cars
+from shared.nodes.search_nodes import make_embed_node, make_vector_search_node
+from shared.search_graph import build_embed_search_graph
 
-
-def _route_after_embed(state: dict) -> str:
-    if state.get("status") == "error":
-        return END
-    return "search_cars"
+_embed = make_embed_node("car")
+_search = make_vector_search_node(
+    get_cars,
+    "car",
+    "trip_cars",
+    format_hit=lambda _i, r: (
+        f"{r.get('color', '')} {r.get('make', '')} {r.get('model', '')} — "
+        f"EUR{r.get('price_per_day_eur', 0)}/day (score: {r.get('score', 0):.4f})"
+    ),
+)
 
 
 def build_car_graph():
-    graph = StateGraph(CarSearchState)
-    graph.add_node("embed_query", embed_query)
-    graph.add_node("search_cars", search_cars)
-    graph.set_entry_point("embed_query")
-    graph.add_conditional_edges("embed_query", _route_after_embed, {END: END, "search_cars": "search_cars"})
-    graph.add_edge("search_cars", END)
-    return graph.compile()
+    return build_embed_search_graph(CarSearchState, _embed, _search, "search_cars")

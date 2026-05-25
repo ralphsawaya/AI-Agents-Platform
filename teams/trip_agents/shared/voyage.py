@@ -5,6 +5,7 @@ used in MongoDB Atlas $vectorSearch. Includes retry logic for transient failures
 """
 
 import requests
+from functools import lru_cache
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from shared.config import VOYAGE_MODEL
@@ -52,8 +53,13 @@ def embed_texts(texts: list[str], model: str | None = None,
 
 
 def embed_query(text: str, model: str | None = None) -> list[float]:
-    """Embed a single search query."""
-    return embed_texts([text], model=model, input_type="query")[0]
+    """Embed a single search query (cached for identical queries in-process)."""
+    return list(_embed_query_cached(text, model or VOYAGE_MODEL))
+
+
+@lru_cache(maxsize=128)
+def _embed_query_cached(text: str, model: str) -> tuple[float, ...]:
+    return tuple(embed_texts([text], model=model, input_type="query")[0])
 
 
 def embed_document(text: str, model: str | None = None) -> list[float]:

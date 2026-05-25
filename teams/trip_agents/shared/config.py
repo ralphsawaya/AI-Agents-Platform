@@ -21,7 +21,7 @@ VOYAGE_AI_API_KEY = os.getenv("VOYAGE_AI_API_KEY", "")
 ATLAS_MONGODB_URI = os.getenv("ATLAS_MONGODB_URI", "")
 
 # --- Local MongoDB (platform) ---
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:55440/?directConnection=true")
 MONGODB_DB = "agent_platform"
 
 # --- Voyage AI ---

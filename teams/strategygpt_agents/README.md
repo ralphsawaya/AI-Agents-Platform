@@ -2,6 +2,8 @@
 
 A three-agent pipeline that scans Google Maps for small and medium businesses without websites, qualifies them, and places AI voice calls to pitch a free website creation offer. Records each lead's response (interested / not interested).
 
+Runs as an **uploaded agent team** on the AI Agent Platform. Development source: `teams/strategygpt_agents/`; runtime copy: `agent_platform/agents_store/f1dc8d87-7fb3-40c7-b497-7c54ffd57f98/strategygpt_agents/`.
+
 ---
 
 ## Agents
@@ -97,9 +99,23 @@ Set these in the `.env` file, in the platform environment, or via the **Settings
 
 ---
 
+## MongoDB
+
+StrategyGPT stores leads and call outcomes in the platform database on the shared MongoDB instance:
+
+```
+mongodb://127.0.0.1:55440/?directConnection=true
+```
+
+Database: `agent_platform` (collections prefixed `strategygpt_`). Set `MONGODB_URI` in the repository-root `.env` — see the root `README.md` and `agent_platform/README.md`.
+
+---
+
 ## LLM
 
-Uses **Google Gemini** (`gemini-2.5-flash`) by default for call script generation. Also supports Anthropic Claude, DeepSeek, Groq, and OpenAI. The LLM provider and model can be configured from the **Settings** tab on the agent detail page (persisted to MongoDB), or via the `LLM_PROVIDER` / `LLM_MODEL` environment variables as fallback.
+Uses **Google Gemini** (`gemini-2.5-flash`) by default for call script generation. Also supports Anthropic Claude, DeepSeek, Groq, and OpenAI. Configure provider and model in the agent **Settings** tab (stored in `team_settings`), or via `LLM_PROVIDER` / `LLM_MODEL` environment variables.
+
+Platform API prefix: `/api/strategygpt/{agent_id}`.
 
 ---
 

@@ -5,7 +5,6 @@ through this module: flights, hotels, cars, reservations, chat
 persistence, long-term memory, search progress, and seed status.
 """
 
-import certifi
 from pymongo import MongoClient
 from pymongo.collection import Collection
 
@@ -15,7 +14,7 @@ from shared.config import (
     CHAT_COLLECTION, LONG_MEMORY_COLLECTION,
     SEARCH_PROGRESS_COLLECTION, SEED_STATUS_COLLECTION,
 )
-from shared.mongo import load_atlas_uri
+from shared.mongo import create_mongo_client, load_atlas_uri
 from shared.logger import get_logger
 
 logger = get_logger("shared.atlas")
@@ -32,7 +31,7 @@ def _get_atlas_db():
             "Set it in the Settings tab or as an environment variable."
         )
     if _atlas_client is None:
-        _atlas_client = MongoClient(uri, tlsCAFile=certifi.where())
+        _atlas_client = create_mongo_client(uri)
     return _atlas_client.get_default_database(default="trip_data")
 
 
@@ -54,6 +53,17 @@ def get_cars() -> Collection:
 
 def get_reservations() -> Collection:
     return get_atlas_collection(RESERVATIONS_COLLECTION)
+
+
+def reservation_filter(reservation_id: str, agent_id: str | None = None) -> dict:
+    """MongoDB filter scoped to the current agent (multi-tenant isolation)."""
+    from shared.config import AGENT_ID
+
+    aid = agent_id or AGENT_ID
+    query: dict = {"_id": reservation_id}
+    if aid:
+        query["agent_id"] = aid
+    return query
 
 
 def get_chat_persistence() -> Collection:

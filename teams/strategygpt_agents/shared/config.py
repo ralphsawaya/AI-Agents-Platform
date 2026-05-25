@@ -26,7 +26,7 @@ MAX_CONCURRENT_CALLS = int(os.getenv("MAX_CONCURRENT_CALLS", "5"))
 CALLS_PER_BATCH = int(os.getenv("CALLS_PER_BATCH", "20"))
 
 # --- MongoDB ---
-MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb://127.0.0.1:55440/?directConnection=true")
 MONGODB_DB = "agent_platform"
 
 # --- Lead filtering defaults ---

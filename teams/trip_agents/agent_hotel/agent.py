@@ -1,27 +1,21 @@
-"""LangGraph StateGraph definition for the Hotel Search agent.
-
-Graph: embed_query --(status ok)--> search_hotels --> END
-                   --(status error)--> END
-"""
-
-from langgraph.graph import StateGraph, END
+"""LangGraph StateGraph definition for the Hotel Search agent."""
 
 from agent_hotel.state import HotelSearchState
-from agent_hotel.nodes.embed_query import embed_query
-from agent_hotel.nodes.search_hotels import search_hotels
+from shared.atlas import get_hotels
+from shared.nodes.search_nodes import make_embed_node, make_vector_search_node
+from shared.search_graph import build_embed_search_graph
 
-
-def _route_after_embed(state: dict) -> str:
-    if state.get("status") == "error":
-        return END
-    return "search_hotels"
+_embed = make_embed_node("hotel")
+_search = make_vector_search_node(
+    get_hotels,
+    "hotel",
+    "trip_hotels",
+    format_hit=lambda _i, r: (
+        f"{r.get('name', '')} — {r.get('stars', 0)}* — "
+        f"EUR{r.get('price_per_night_eur', 0)}/night (score: {r.get('score', 0):.4f})"
+    ),
+)
 
 
 def build_hotel_graph():
-    graph = StateGraph(HotelSearchState)
-    graph.add_node("embed_query", embed_query)
-    graph.add_node("search_hotels", search_hotels)
-    graph.set_entry_point("embed_query")
-    graph.add_conditional_edges("embed_query", _route_after_embed, {END: END, "search_hotels": "search_hotels"})
-    graph.add_edge("search_hotels", END)
-    return graph.compile()
+    return build_embed_search_graph(HotelSearchState, _embed, _search, "search_hotels")

@@ -18,10 +18,11 @@ import random
 import sys
 import time
 
-import certifi
 import requests
 from pymongo import MongoClient
 from pymongo.operations import SearchIndexModel
+
+from shared.mongo import create_mongo_client
 
 # ---------------------------------------------------------------------------
 # Config
@@ -40,7 +41,7 @@ if not ATLAS_URI:
 if not VOYAGE_KEY:
     sys.exit("Set VOYAGE_AI_API_KEY in your environment")
 
-client = MongoClient(ATLAS_URI, tlsCAFile=certifi.where())
+client = create_mongo_client(ATLAS_URI)
 db = client.get_default_database(default="trip_data")
 
 # ---------------------------------------------------------------------------
@@ -441,7 +442,6 @@ def _wait_for_index_drop(col, index_name: str, timeout: int = 60):
             return
         _time.sleep(1)
     print(f"  WARNING: Timed out waiting for {index_name} to drop on {col.name}")
-    print(f"  Index creation initiated for {collection_name}")
 
 
 # ---------------------------------------------------------------------------

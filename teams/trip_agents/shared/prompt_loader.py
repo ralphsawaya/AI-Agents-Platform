@@ -15,7 +15,7 @@ def load_prompt(name: str, **variables: str) -> str:
     """Load a prompt template by name and substitute variables.
 
     Args:
-        name: Filename without extension (e.g. "query_parser_system").
+        name: Filename without extension (e.g. "trip_planner_plan").
         **variables: Key-value pairs to substitute for {{key}} placeholders.
 
     Returns:

@@ -123,7 +123,7 @@ async def execute_agent(
 
     # MONGODB_URI from platform environment (infrastructure)
     if "MONGODB_URI" not in env:
-        env["MONGODB_URI"] = "mongodb://localhost:27017"
+        env["MONGODB_URI"] = "mongodb://127.0.0.1:55440/?directConnection=true"
 
     timeout = agent.get("timeout_seconds", settings.DEFAULT_TIMEOUT_SECONDS)
 

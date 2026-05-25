@@ -30,13 +30,19 @@ from shared.config import AGENT_ID
 from shared.llm import get_llm
 from shared.memory import format_preferences_for_prompt, learn_from_thread, load_preferences
 from shared.prompt_loader import load_prompt_raw
-from shared.query_parser import _extract_json
+from shared.json_utils import extract_json
+from shared.utils import hotel_nights_from_trip_dates
 from shared.logger import get_logger
 
 logger = get_logger("orchestrator.graph")
 
 MAX_REPLAN = 2
 _SEARCH_TOOLS = {"search_flights", "search_hotels", "search_cars"}
+_TOOL_TO_MODIFY_CATEGORY = {
+    "search_flights": "flight",
+    "search_hotels": "hotel",
+    "search_cars": "car",
+}
 
 
 def _build_history_prompt(query: str, chat_history: list, extra: str = "") -> str:
@@ -116,7 +122,7 @@ def plan_node(state: dict) -> dict:
     try:
         llm = get_llm()
         raw = llm.invoke(_build_history_prompt(query, chat_history, extra), system=system)
-        plan = _extract_json(raw)
+        plan = extract_json(raw)
     except Exception as exc:
         logger.error("Plan LLM failed: %s", exc)
         return {
@@ -144,10 +150,19 @@ def plan_node(state: dict) -> dict:
 
     logger.info("Plan intent=%s tools=%s", intent, [c.get("tool") for c in tool_calls])
 
+    modify_category = state.get("modify_category", "")
+    if mode == "modify" and not modify_category:
+        for call in tool_calls:
+            cat = _TOOL_TO_MODIFY_CATEGORY.get(call.get("tool", ""))
+            if cat:
+                modify_category = cat
+                break
+
     return {
         "plan": plan,
         "intent": intent,
         "reply": reply,
+        "modify_category": modify_category,
     }
 
 
@@ -208,7 +223,7 @@ def synthesize_node(state: dict) -> dict:
     try:
         llm = get_llm()
         raw = llm.invoke(prompt, system=system)
-        parsed = _extract_json(raw)
+        parsed = extract_json(raw)
         if isinstance(parsed, dict) and parsed:
             reply = parsed.get("content") or ""
             proposed_bundle = parsed.get("proposed_bundle")
@@ -219,13 +234,15 @@ def synthesize_node(state: dict) -> dict:
         flights = final_search_results.get("flights") or []
         hotels = final_search_results.get("hotels") or []
         cars = final_search_results.get("cars") or []
+        reservation = state.get("reservation") or {}
+        nights = hotel_nights_from_trip_dates(reservation.get("trip_dates"))
         total = 0.0
         if flights:
             total += flights[0].get("price_eur", 0)
         if hotels:
-            total += hotels[0].get("price_per_night_eur", 0) * 7
+            total += hotels[0].get("price_per_night_eur", 0) * nights
         if cars:
-            total += cars[0].get("price_per_day_eur", 0) * 7
+            total += cars[0].get("price_per_day_eur", 0) * nights
         proposed_bundle = {
             "flight": flights[0] if flights else None,
             "hotel": hotels[0] if hotels else None,
@@ -313,6 +330,8 @@ def persist_and_learn(state: dict) -> dict:
     query = state.get("query", "")
     if query:
         chat_history = chat_history + [{"role": "user", "content": query}]
+    if reply:
+        chat_history = chat_history + [{"role": "assistant", "content": reply}]
 
     def _run():
         try:
@@ -336,10 +355,8 @@ def route_after_execute(state: dict) -> str:
     replan_count = state.get("replan_count", 0)
     tool_results = state.get("tool_results") or []
 
-    empty_search = any(
-        tr.get("tool") in _SEARCH_TOOLS and tr.get("count", 0) == 0
-        for tr in tool_results
-    )
+    search_invoked = [tr for tr in tool_results if tr.get("tool") in _SEARCH_TOOLS]
+    empty_search = bool(search_invoked) and all(tr.get("count", 0) == 0 for tr in search_invoked)
 
     if empty_search and replan_count < MAX_REPLAN:
         logger.info("Empty search results — replanning (%d/%d)", replan_count + 1, MAX_REPLAN)
@@ -368,14 +385,7 @@ def create_reservation(state: dict) -> dict:
     trip_dates = state.get("trip_dates", {})
     thread_id = state.get("thread_id", "")
 
-    hotel_nights = 1
-    if trip_dates.get("start") and trip_dates.get("end"):
-        try:
-            start = datetime.fromisoformat(trip_dates["start"])
-            end = datetime.fromisoformat(trip_dates["end"])
-            hotel_nights = max((end - start).days, 1)
-        except (ValueError, TypeError):
-            pass
+    hotel_nights = hotel_nights_from_trip_dates(trip_dates, default=1)
 
     total = 0.0
     if flight:
@@ -387,9 +397,10 @@ def create_reservation(state: dict) -> dict:
 
     now = datetime.now(timezone.utc)
     res_id = _generate_reservation_id(now)
+    traveler_name = (state.get("traveler_name") or "").strip() or "Guest"
     reservation = {
         "_id": res_id,
-        "traveler_name": "John Doe",
+        "traveler_name": traveler_name,
         "trip_dates": trip_dates,
         "total_cost_eur": round(total, 2),
         "status": "confirmed",
@@ -442,8 +453,16 @@ def create_reservation(state: dict) -> dict:
 
 # -- Graph builders -----------------------------------------------------------
 
+_AGENT_GRAPH = None
+_RESERVE_GRAPH = None
+
+
 def build_agent_graph():
     """Plan -> execute -> (replan loop) -> synthesize -> persist."""
+    global _AGENT_GRAPH
+    if _AGENT_GRAPH is not None:
+        return _AGENT_GRAPH
+
     graph = StateGraph(TripAgentState)
     graph.add_node("plan", plan_node)
     graph.add_node("execute", execute_tools_node)
@@ -463,7 +482,8 @@ def build_agent_graph():
     graph.add_edge("replan_bump", "plan")
     graph.add_edge("synthesize", "persist")
     graph.add_edge("persist", END)
-    return graph.compile()
+    _AGENT_GRAPH = graph.compile()
+    return _AGENT_GRAPH
 
 
 def build_search_graph():
@@ -472,11 +492,16 @@ def build_search_graph():
 
 
 def build_reserve_graph():
+    global _RESERVE_GRAPH
+    if _RESERVE_GRAPH is not None:
+        return _RESERVE_GRAPH
+
     graph = StateGraph(TripReserveState)
     graph.add_node("create_reservation", create_reservation)
     graph.set_entry_point("create_reservation")
     graph.add_edge("create_reservation", END)
-    return graph.compile()
+    _RESERVE_GRAPH = graph.compile()
+    return _RESERVE_GRAPH
 
 
 def _initial_agent_state(

@@ -28,5 +28,6 @@ class TripReserveState(TypedDict):
     selected_hotel: dict[str, Any]
     selected_car: dict[str, Any]
     trip_dates: dict[str, str]
+    traveler_name: str
     reservation: dict[str, Any]
     status: str

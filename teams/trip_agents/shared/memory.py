@@ -17,13 +17,12 @@ Each document in trip_longMemory:
   }
 """
 
-import json
-import re
 from datetime import datetime, timezone
 
 from shared.atlas import get_long_memory
 from shared.llm import get_llm
 from shared.prompt_loader import load_prompt_raw
+from shared.json_utils import extract_json_array
 from shared.logger import get_logger
 
 logger = get_logger("shared.memory")
@@ -52,11 +51,8 @@ def extract_preferences(messages: list, existing_prefs: list | None = None) -> l
         prompt = f"Conversation:\n{convo}{existing_text}"
         raw = llm.invoke(prompt, system=load_prompt_raw("memory_extraction"))
 
-        match = re.search(r"\[.*\]", raw, re.DOTALL)
-        if not match:
-            return []
-        parsed = json.loads(match.group())
-        if not isinstance(parsed, list):
+        parsed = extract_json_array(raw)
+        if not parsed:
             return []
 
         now = datetime.now(timezone.utc)

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Loads MongoDB connection strings from the project .env file for Cursor MCP.
-# Usage: run-mongodb-mcp.sh [local|atlas]
+# Loads MongoDB connection string from the project .env file for Cursor MCP.
+# Default: mongodb://127.0.0.1:55440/?directConnection=true
 
 set -euo pipefail
 
@@ -13,19 +13,6 @@ if [ -f "$ROOT/.env" ]; then
   set +a
 fi
 
-TARGET="${1:-local}"
-
-if [ "$TARGET" = "atlas" ]; then
-  export MDB_MCP_CONNECTION_STRING="${ATLAS_MONGODB_URI:-}"
-  VAR_NAME="ATLAS_MONGODB_URI"
-else
-  export MDB_MCP_CONNECTION_STRING="${MONGODB_URI:-mongodb://localhost:27017}"
-  VAR_NAME="MONGODB_URI"
-fi
-
-if [ "$TARGET" = "atlas" ] && [ -z "$MDB_MCP_CONNECTION_STRING" ]; then
-  echo "Error: $VAR_NAME is not set. Add it to $ROOT/.env (see .env.example)." >&2
-  exit 1
-fi
+export MDB_MCP_CONNECTION_STRING="${ATLAS_MONGODB_URI:-${MONGODB_URI:-mongodb://127.0.0.1:55440/?directConnection=true}}"
 
 exec npx -y mongodb-mcp-server@latest

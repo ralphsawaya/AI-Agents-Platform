@@ -114,6 +114,7 @@ def run_reserve(args: dict):
     selected_hotel = args.get("selected_hotel", {})
     selected_car = args.get("selected_car", {})
     trip_dates = args.get("trip_dates", {})
+    traveler_name = (args.get("traveler_name") or "").strip() or "Guest"
 
     if not any([selected_flight, selected_hotel, selected_car]):
         logger.error("No selection provided — at least one of flight, hotel, or car is required")
@@ -125,6 +126,7 @@ def run_reserve(args: dict):
         "thread_id": thread_id,
         "selected_flight": selected_flight, "selected_hotel": selected_hotel,
         "selected_car": selected_car, "trip_dates": trip_dates,
+        "traveler_name": traveler_name,
         "reservation": {}, "status": "pending",
     })
 
@@ -145,7 +147,7 @@ def run_reserve(args: dict):
 
 def run_cancel(args: dict):
     from datetime import datetime, timezone
-    from shared.atlas import get_reservations, get_chat_persistence
+    from shared.atlas import get_reservations, get_chat_persistence, reservation_filter
 
     reservation_id = args.get("reservation_id", "")
     thread_id = args.get("thread_id", "")
@@ -160,7 +162,8 @@ def run_cancel(args: dict):
 
     try:
         col = get_reservations()
-        existing = col.find_one({"_id": reservation_id})
+        res_filter = reservation_filter(reservation_id)
+        existing = col.find_one(res_filter)
         if not existing:
             msg = f"Reservation {reservation_id} was not found. It may have already been deleted."
             logger.warning(msg)
@@ -169,7 +172,7 @@ def run_cancel(args: dict):
             print(f"\n__RESULT_JSON__:{json.dumps(output)}")
             return None
 
-        result = col.delete_one({"_id": reservation_id})
+        result = col.delete_one(res_filter)
         if result.deleted_count > 0:
             msg = f"Reservation {reservation_id} has been successfully cancelled."
             logger.info(msg)
@@ -220,7 +223,7 @@ def _save_cancel_message(thread_id: str, reservation_id: str, success: bool, det
 
 def run_modify(args: dict):
     """Run Plan-and-Execute agent in modify mode for one reservation category."""
-    from shared.atlas import get_reservations
+    from shared.atlas import get_reservations, reservation_filter
 
     reservation_id = args.get("reservation_id", "")
     thread_id = args.get("thread_id", "")
@@ -232,7 +235,7 @@ def run_modify(args: dict):
         print(f"\n__RESULT_JSON__:{json.dumps(output)}")
         return None
 
-    reservation = get_reservations().find_one({"_id": reservation_id})
+    reservation = get_reservations().find_one(reservation_filter(reservation_id))
     if not reservation:
         _save_chat_msg(thread_id, f"Reservation {reservation_id} was not found.")
         output = {"status": "not_found", "reservation_id": reservation_id}
@@ -272,7 +275,8 @@ def run_modify(args: dict):
 def run_update(args: dict):
     """Apply a selected replacement to an existing reservation."""
     from datetime import datetime, timezone
-    from shared.atlas import get_reservations, get_chat_persistence
+    from shared.atlas import get_reservations, get_chat_persistence, reservation_filter
+    from shared.utils import VALID_RESERVATION_CATEGORIES, hotel_nights_from_trip_dates
 
     reservation_id = args.get("reservation_id", "")
     category = args.get("category", "")
@@ -285,9 +289,16 @@ def run_update(args: dict):
         print(f"\n__RESULT_JSON__:{json.dumps(output)}")
         return None
 
+    if category not in VALID_RESERVATION_CATEGORIES:
+        _save_chat_msg(thread_id, f"Invalid category '{category}'. Must be flight, hotel, or car.")
+        output = {"status": "error", "error": "Invalid category"}
+        print(f"\n__RESULT_JSON__:{json.dumps(output)}")
+        return None
+
     try:
         res_col = get_reservations()
-        reservation = res_col.find_one({"_id": reservation_id})
+        res_filter = reservation_filter(reservation_id)
+        reservation = res_col.find_one(res_filter)
         if not reservation:
             _save_chat_msg(thread_id, f"Reservation {reservation_id} was not found.")
             output = {"status": "not_found"}
@@ -296,14 +307,7 @@ def run_update(args: dict):
 
         old_item = reservation.get(category, {})
         trip_dates = reservation.get("trip_dates", {})
-        hotel_nights = 1
-        if trip_dates.get("start") and trip_dates.get("end"):
-            try:
-                start = datetime.fromisoformat(trip_dates["start"])
-                end = datetime.fromisoformat(trip_dates["end"])
-                hotel_nights = max((end - start).days, 1)
-            except (ValueError, TypeError):
-                pass
+        hotel_nights = hotel_nights_from_trip_dates(trip_dates)
 
         update_fields = {category: selected_item}
 
@@ -320,7 +324,7 @@ def run_update(args: dict):
                 total += item.get("price_per_day_eur", 0) * hotel_nights
         update_fields["total_cost_eur"] = round(total, 2)
 
-        res_col.update_one({"_id": reservation_id}, {"$set": update_fields})
+        res_col.update_one(res_filter, {"$set": update_fields})
         logger.info("Updated %s in reservation %s, new total: EUR%.2f",
                      category, reservation_id, total)
 

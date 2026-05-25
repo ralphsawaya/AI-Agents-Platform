@@ -657,7 +657,7 @@
         latestResults = null;
         const div = document.createElement('div');
         div.className = 'reservation-banner';
-        div.textContent = `Reservation confirmed! Total: EUR ${(res.total_cost_eur || 0).toFixed(2)} — Traveler: ${res.traveler_name || 'John Doe'}`;
+        div.textContent = `Reservation confirmed! Total: EUR ${(res.total_cost_eur || 0).toFixed(2)} — Traveler: ${res.traveler_name || 'Guest'}`;
         panel.appendChild(div);
     }
 

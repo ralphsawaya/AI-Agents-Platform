@@ -273,7 +273,7 @@ except Exception as exc:
             if k and v:
                 env[k] = v
     if "MONGODB_URI" not in env:
-        env["MONGODB_URI"] = "mongodb://localhost:27017"
+        env["MONGODB_URI"] = "mongodb://127.0.0.1:55440/?directConnection=true"
 
     try:
         proc = subprocess.run(

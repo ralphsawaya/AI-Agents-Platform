@@ -9,6 +9,7 @@ Includes retry logic (tenacity) and singleton client caching per provider+model.
 
 from __future__ import annotations
 
+import requests
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from shared.config import LLM_TEMPERATURE, MAX_TOKENS
@@ -19,12 +20,20 @@ logger = get_logger("shared.llm")
 
 LLM_TIMEOUT = 30
 
+# Retry only transient failures — not auth, bad model, or invalid requests.
+_RETRYABLE = (
+    ConnectionError,
+    TimeoutError,
+    requests.RequestException,
+    OSError,
+)
+
 
 def _llm_retry():
     return retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception_type(_RETRYABLE),
         before_sleep=lambda rs: logger.warning(
             "LLM call failed (attempt %d), retrying: %s", rs.attempt_number, rs.outcome.exception()
         ),
@@ -48,7 +57,15 @@ class _GeminiLLM:
         response = self._client.models.generate_content(
             model=self.model, contents=prompt, config=config,
         )
-        return response.text
+        text = getattr(response, "text", None)
+        if text:
+            return text
+        candidates = getattr(response, "candidates", None) or []
+        if candidates:
+            parts = getattr(candidates[0].content, "parts", None) or []
+            if parts and getattr(parts[0], "text", None):
+                return parts[0].text
+        raise ValueError("Gemini returned an empty response")
 
 
 class _ClaudeLLM:
@@ -134,6 +151,11 @@ _llm_cache: dict[tuple[str, str], object] = {}
 def get_llm():
     """Return a cached LLM instance based on team_settings (MongoDB -> env fallback)."""
     provider, model, api_key = load_llm_config()
+    if not api_key:
+        raise ValueError(
+            f"No API key configured for LLM provider '{provider}'. "
+            "Set it in the agent Settings tab or via environment variables."
+        )
     cache_key = (provider, model)
     if cache_key in _llm_cache:
         return _llm_cache[cache_key]

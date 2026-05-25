@@ -5,20 +5,30 @@ A production-grade web platform for managing the full lifecycle of multi-agent A
 ## Prerequisites
 
 - **Python 3.11+**
-- **MongoDB 8.0** (running locally or via Docker)
-- **Docker** (optional — for running MongoDB)
+- **MongoDB** — local deployment at `127.0.0.1:55440` (Atlas-compatible; supports vector search for Trip Agents)
 
-### Quick MongoDB Setup with Docker
+### MongoDB
 
-```bash
-docker run -d --name mongodb -p 27017:27017 mongo:8.0
+The platform uses a **single MongoDB instance** at:
+
 ```
+mongodb://127.0.0.1:55440/?directConnection=true
+```
+
+Two databases on that instance:
+
+| Database | Used by |
+|----------|---------|
+| `agent_platform` | Platform metadata, runs, schedules, team settings |
+| `trip_data` | Trip Agents inventory, chat, reservations, vector indexes |
+
+Set both `MONGODB_URI` and `ATLAS_MONGODB_URI` to this connection string in `.env` (see `.env.example`). StrategyGPT collections also live on the same instance under `agent_platform`.
 
 ## Project Structure
 
 ```
 AI-Agents-Platform/
-├── agent_platform/          # The platform itself (FastAPI app)
+├── agent_platform/          # The platform itself (FastAPI app) — see agent_platform/README.md
 │   ├── api/                 # REST & WebSocket routes
 │   ├── core/                # Business logic (executor, monitor, scheduler…)
 │   ├── db/                  # MongoDB repositories & indexes
@@ -30,6 +40,15 @@ AI-Agents-Platform/
 ```
 
 Each folder inside `teams/` is a **team workspace** — a place to develop and package an agent team. When ready, run `build_zip.py` inside the workspace to produce a `.zip` ready for upload.
+
+### Included agent teams
+
+| Team | Purpose | Documentation |
+|------|---------|---------------|
+| [`trip_agents/`](teams/trip_agents/) | Conversational trip search, booking, and reservations (flights, hotels, cars) | [teams/trip_agents/README.md](teams/trip_agents/README.md) |
+| [`strategygpt_agents/`](teams/strategygpt_agents/) | Lead sourcing, qualification, and AI voice outreach for SMB website sales | [teams/strategygpt_agents/README.md](teams/strategygpt_agents/README.md) |
+
+Trip Agents adds custom UI tabs (Trip Planner, Reservations), a dedicated REST API at `/api/trip/{agent_id}`, and stores domain data in the `trip_data` database on the same MongoDB instance (`127.0.0.1:55440`). StrategyGPT adds `/api/strategygpt/{agent_id}` routes and its own MongoDB collections (`strategygpt_*`) on `agent_platform`.
 
 ## Setup & Run
 
@@ -44,13 +63,10 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r agent_platform/requirements.txt
 
-# Create a .env file with your API keys and settings
-cat > .env << 'EOF'
-MONGODB_URI=mongodb://localhost:27017
-MONGODB_DB_NAME=agent_platform
-PORT=8000
-GROQ_API_KEY=your_groq_api_key_here
-EOF
+# Create a .env file from the template and add your API keys
+cp .env.example .env
+# Both MongoDB variables default to mongodb://127.0.0.1:55440/?directConnection=true
+# Edit .env to add LLM provider keys and VOYAGE_AI_API_KEY (Trip Agents).
 
 # Initialise MongoDB indexes
 python -m agent_platform.db.init_indexes
@@ -204,6 +220,16 @@ When you upload a `.zip`, the platform extracts it into `agents_store/` under a 
 
 If you're not using Cursor, you'll need to either re-zip and re-upload, or manually copy changed files into the `agents_store/` directory.
 
+### Cursor MCP (MongoDB)
+
+The project includes one MongoDB MCP server for local development: **`MongoDB-Atlas-Local`**. **Never commit credentials in `.cursor/mcp.json`.** The connection string is loaded from your `.env` file via [`.cursor/run-mongodb-mcp.sh`](.cursor/run-mongodb-mcp.sh):
+
+| MCP server | `.env` variables (first match wins) | Purpose |
+|------------|-------------------------------------|---------|
+| `MongoDB-Atlas-Local` | `ATLAS_MONGODB_URI`, then `MONGODB_URI` | Local MongoDB at `127.0.0.1:55440` (`agent_platform`, `trip_data`, etc.) |
+
+Copy [`.cursor/mcp.json.example`](.cursor/mcp.json.example) to `.cursor/mcp.json` if needed. Both URI variables default to `mongodb://127.0.0.1:55440/?directConnection=true`. To sync `ATLAS_MONGODB_URI` into Trip Agents Settings, run [`scripts/update-atlas-uri.sh`](scripts/update-atlas-uri.sh).
+
 ## Architecture Overview
 
 ```
@@ -216,6 +242,7 @@ If you're not using Cursor, you'll need to either re-zip and re-upload, or manua
 ┌─────────────────────▼────────────────────────────────┐
 │                  FastAPI Application                 │
 │  REST Routes │ WebSocket │ SSR                       │
+│  /api/trip · /api/strategygpt (team-specific)        │
 └──────┬──────────────┬────────────────────────────────┘
        │              │
 ┌──────▼──────┐ ┌─────▼────────────────────────────────┐
@@ -224,9 +251,10 @@ If you're not using Cursor, you'll need to either re-zip and re-upload, or manua
 │  executor   │ │  relationship_repo │ indexes          │
 │  scheduler  │ └─────────────────────┬────────────────┘
 │  monitor    │                       │
-│  graph_bld  │               ┌───────▼───────┐
-│  venv_mgr   │               │   MongoDB 8.0 │
-└──────┬──────┘               └───────────────┘
+│  graph_bld  │               ┌───────▼───────────────────────────┐
+│  venv_mgr   │               │  MongoDB @ 127.0.0.1:55440         │
+└──────┬──────┘               │  agent_platform · trip_data        │
+       │                      └───────────────────────────────────┘
        │
 ┌──────▼────────────────────┐
 │  agents_store/ (on disk)  │
@@ -271,8 +299,10 @@ All settings are in `agent_platform/config.py` and overridable via `.env`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MONGODB_URI` | `mongodb://localhost:27017` | MongoDB connection string |
-| `MONGODB_DB_NAME` | `agent_platform` | Database name |
+| `MONGODB_URI` | `mongodb://127.0.0.1:55440/?directConnection=true` | Platform database connection (`agent_platform`) |
+| `MONGODB_DB_NAME` | `agent_platform` | Platform database name |
+| `ATLAS_MONGODB_URI` | `mongodb://127.0.0.1:55440/?directConnection=true` | Trip Agents domain database (`trip_data`); same MongoDB instance |
+| `VOYAGE_AI_API_KEY` | *(empty)* | Voyage AI embeddings for Trip Agents vector search |
 | `AGENTS_STORE_PATH` | `agent_platform/agents_store` | Agent file storage path |
 | `DEFAULT_TIMEOUT_SECONDS` | `300` | Max execution time per run |
 | `FAILURE_ALERT_THRESHOLD` | `3` | Consecutive failures before alert |
@@ -285,7 +315,7 @@ All settings are in `agent_platform/config.py` and overridable via `.env`:
 ## Technical Stack
 
 - **FastAPI** with Jinja2 server-rendered UI
-- **MongoDB 8.0** via Motor (async driver)
+- **MongoDB** via Motor (async driver) — `127.0.0.1:55440`
 - **APScheduler** with MongoDBJobStore
 - **Python subprocess** with isolated venvs per team
 - **WebSockets** for live log streaming and monitor updates

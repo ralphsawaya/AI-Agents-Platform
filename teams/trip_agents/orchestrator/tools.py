@@ -5,6 +5,7 @@ Plain Python functions invoked from JSON plans — not LangChain @tool decorator
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -12,11 +13,11 @@ from typing import Any, Callable
 from agent_car.agent import build_car_graph
 from agent_flight.agent import build_flight_graph
 from agent_hotel.agent import build_hotel_graph
-from shared.atlas import get_reservations, get_search_progress
+from shared.atlas import get_reservations, get_search_progress, reservation_filter
 from shared.config import AGENT_ID
 from shared.logger import get_logger
 from shared.memory import load_preferences
-from shared.query_parser import _clean_car_filters, _clean_flight_filters, _clean_hotel_filters
+from shared.filters import _clean_car_filters, _clean_flight_filters, _clean_hotel_filters
 
 logger = get_logger("orchestrator.tools")
 
@@ -24,6 +25,17 @@ _SEARCH_TOOL_TO_CATEGORY = {
     "search_flights": "flights",
     "search_hotels": "hotels",
     "search_cars": "cars",
+}
+
+# Compiled once — avoid re-building LangGraph on every tool call.
+_FLIGHT_GRAPH = build_flight_graph()
+_HOTEL_GRAPH = build_hotel_graph()
+_CAR_GRAPH = build_car_graph()
+
+_GRAPH_BY_BUILDER: dict[Callable, Any] = {
+    build_flight_graph: _FLIGHT_GRAPH,
+    build_hotel_graph: _HOTEL_GRAPH,
+    build_car_graph: _CAR_GRAPH,
 }
 
 
@@ -50,7 +62,11 @@ def _publish_partial(thread_id: str, category: str, results: list):
 
 
 def _run_search_graph(build_graph: Callable, filters: dict, query: str) -> list[dict]:
-    result = build_graph().invoke({
+    graph = _GRAPH_BY_BUILDER.get(build_graph)
+    if graph is None:
+        graph = build_graph()
+        _GRAPH_BY_BUILDER[build_graph] = graph
+    result = graph.invoke({
         "query": query,
         "query_embedding": [],
         "filters": filters,
@@ -89,7 +105,7 @@ def get_reservation(ctx: ToolContext, args: dict) -> dict:
     res_id = args.get("reservation_id") or ctx.reservation_id
     if not res_id:
         return {}
-    doc = get_reservations().find_one({"_id": res_id})
+    doc = get_reservations().find_one(reservation_filter(res_id))
     return doc or {}
 
 
@@ -115,8 +131,8 @@ def reset_search_progress(thread_id: str):
             }},
             upsert=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to reset search progress for %s: %s", thread_id, exc)
 
 
 def set_planned_categories(thread_id: str, tool_calls: list[dict]):
@@ -136,8 +152,8 @@ def set_planned_categories(thread_id: str, tool_calls: list[dict]):
             {"$set": {"categories": categories}},
             upsert=True,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to set planned categories for %s: %s", thread_id, exc)
 
 
 def mark_search_progress_done(thread_id: str):
@@ -145,41 +161,72 @@ def mark_search_progress_done(thread_id: str):
         return
     try:
         get_search_progress().update_one({"_id": thread_id}, {"$set": {"done": True}})
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to mark search progress done for %s: %s", thread_id, exc)
+
+
+def _run_single_tool(
+    call: dict,
+    ctx: ToolContext,
+) -> tuple[dict, dict[str, list], dict]:
+    """Execute one planned tool. Returns (tool_result, search_slice, trace_entry)."""
+    name = call.get("tool", "")
+    args = call.get("args") or {}
+    if not isinstance(args, dict):
+        args = {}
+
+    fn = TOOL_REGISTRY.get(name)
+    if not fn:
+        logger.warning("Unknown tool in plan: %s", name)
+        tr = {"tool": name, "args": args, "results": [], "error": "unknown_tool", "count": 0}
+        trace = {"tool": name, "args": args, "result_count": 0, "error": "unknown_tool"}
+        return tr, {}, trace
+
+    try:
+        logger.info("Executing tool: %s args=%s", name, args)
+        results = fn(ctx, args)
+        search_slice: dict[str, list] = {}
+        if name in _SEARCH_TOOL_TO_CATEGORY:
+            category = _SEARCH_TOOL_TO_CATEGORY[name]
+            search_slice[category] = results if isinstance(results, list) else []
+        count = len(results) if isinstance(results, list) else (1 if results else 0)
+        tr = {"tool": name, "args": args, "results": results, "count": count}
+        trace = {"tool": name, "args": args, "result_count": count}
+        return tr, search_slice, trace
+    except Exception as exc:
+        logger.error("Tool %s failed: %s", name, exc)
+        tr = {"tool": name, "args": args, "results": [], "error": str(exc), "count": 0}
+        trace = {"tool": name, "args": args, "result_count": 0, "error": str(exc)}
+        return tr, {}, trace
 
 
 def execute_tool_calls(tool_calls: list[dict], ctx: ToolContext) -> tuple[list[dict], dict, list[dict]]:
-    """Run planned tools sequentially. Returns (tool_results, search_results, tool_trace)."""
+    """Run planned tools. Independent search tools run in parallel."""
     tool_results: list[dict] = []
     search_results: dict[str, list] = {"flights": [], "hotels": [], "cars": []}
     tool_trace: list[dict] = []
 
-    for call in tool_calls:
-        name = call.get("tool", "")
-        args = call.get("args") or {}
-        if not isinstance(args, dict):
-            args = {}
+    search_calls = [c for c in tool_calls if c.get("tool") in _SEARCH_TOOL_TO_CATEGORY]
+    other_calls = [c for c in tool_calls if c.get("tool") not in _SEARCH_TOOL_TO_CATEGORY]
 
-        fn = TOOL_REGISTRY.get(name)
-        if not fn:
-            logger.warning("Unknown tool in plan: %s", name)
-            tool_results.append({"tool": name, "args": args, "results": [], "error": "unknown_tool"})
-            tool_trace.append({"tool": name, "args": args, "result_count": 0, "error": "unknown_tool"})
-            continue
+    ordered_results: list[tuple[dict, dict[str, list], dict]] = []
 
-        try:
-            logger.info("Executing tool: %s args=%s", name, args)
-            results = fn(ctx, args)
-            if name in _SEARCH_TOOL_TO_CATEGORY:
-                category = _SEARCH_TOOL_TO_CATEGORY[name]
-                search_results[category] = results if isinstance(results, list) else []
-            count = len(results) if isinstance(results, list) else (1 if results else 0)
-            tool_results.append({"tool": name, "args": args, "results": results, "count": count})
-            tool_trace.append({"tool": name, "args": args, "result_count": count})
-        except Exception as exc:
-            logger.error("Tool %s failed: %s", name, exc)
-            tool_results.append({"tool": name, "args": args, "results": [], "error": str(exc)})
-            tool_trace.append({"tool": name, "args": args, "result_count": 0, "error": str(exc)})
+    for call in other_calls:
+        ordered_results.append(_run_single_tool(call, ctx))
+
+    if len(search_calls) <= 1:
+        for call in search_calls:
+            ordered_results.append(_run_single_tool(call, ctx))
+    else:
+        with ThreadPoolExecutor(max_workers=min(len(search_calls), 3)) as pool:
+            futures = {pool.submit(_run_single_tool, call, ctx): call for call in search_calls}
+            for future in as_completed(futures):
+                ordered_results.append(future.result())
+
+    for tr, search_slice, trace in ordered_results:
+        tool_results.append(tr)
+        tool_trace.append(trace)
+        for key, items in search_slice.items():
+            search_results[key] = items
 
     return tool_results, search_results, tool_trace

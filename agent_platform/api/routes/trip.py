@@ -69,12 +69,19 @@ async def _get_voyage_key(agent_id: str) -> str:
     return os.getenv("VOYAGE_AI_API_KEY", "")
 
 
+def _create_mongo_client(uri: str) -> MongoClient:
+    """Use TLS for Atlas cloud (mongodb+srv); plain connection for local deployments."""
+    if uri.startswith("mongodb+srv://"):
+        return MongoClient(uri, tlsCAFile=certifi.where())
+    return MongoClient(uri)
+
+
 def _get_atlas_db(uri: str):
     global _atlas_client
     if not uri:
         return None
     if _atlas_client is None:
-        _atlas_client = MongoClient(uri, tlsCAFile=certifi.where())
+        _atlas_client = _create_mongo_client(uri)
     return _atlas_client.get_default_database(default="trip_data")
 
 
@@ -263,6 +270,7 @@ async def send_message(agent_id: str, thread_id: str, body: SendMessageBody):
                 "selected_hotel": payload.get("selected_hotel", {}),
                 "selected_car": payload.get("selected_car", {}),
                 "trip_dates": payload.get("trip_dates", {}),
+                "traveler_name": payload.get("traveler_name", ""),
             },
         )
 
@@ -569,7 +577,9 @@ async def delete_reservation(agent_id: str, reservation_id: str):
         atlas_db = _get_atlas_db(uri)
         if atlas_db is None:
             return _err("Cannot connect to Atlas")
-        result = atlas_db["trip_reservations"].delete_one({"_id": reservation_id})
+        result = atlas_db["trip_reservations"].delete_one(
+            {"_id": reservation_id, "agent_id": agent_id}
+        )
         if result.deleted_count == 0:
             return _err("Reservation not found")
         return _ok({"deleted": reservation_id})

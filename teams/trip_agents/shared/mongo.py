@@ -5,6 +5,7 @@ and LLM/key configuration.  All trip domain data (including search
 progress and seed status) lives on Atlas — see atlas.py.
 """
 
+import certifi
 from pymongo import MongoClient
 from pymongo.collection import Collection
 
@@ -24,6 +25,13 @@ _ENV_API_KEYS = {
 }
 
 _client: MongoClient | None = None
+
+
+def create_mongo_client(uri: str) -> MongoClient:
+    """Use TLS for Atlas cloud (mongodb+srv); plain connection for local deployments."""
+    if uri.startswith("mongodb+srv://"):
+        return MongoClient(uri, tlsCAFile=certifi.where())
+    return MongoClient(uri)
 
 
 def _get_db():

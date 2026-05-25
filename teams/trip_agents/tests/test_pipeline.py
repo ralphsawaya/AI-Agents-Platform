@@ -18,11 +18,11 @@ def test_shared_config_imports():
 
 
 def test_state_schemas():
-    from orchestrator.state import TripSearchState, TripReserveState
-    assert "query" in TripSearchState.__annotations__
-    assert "flight_results" in TripSearchState.__annotations__
-    assert "hotel_results" in TripSearchState.__annotations__
-    assert "car_results" in TripSearchState.__annotations__
+    from orchestrator.state import TripAgentState, TripReserveState
+    assert "query" in TripAgentState.__annotations__
+    assert "search_results" in TripAgentState.__annotations__
+    assert "modify_category" in TripAgentState.__annotations__
+    assert "tool_trace" in TripAgentState.__annotations__
     assert "selected_flight" in TripReserveState.__annotations__
     assert "reservation" in TripReserveState.__annotations__
 
@@ -45,6 +45,53 @@ def test_utils_load_args():
     assert args["mode"] == "search"
     assert args["prompt"] == "test"
     os.environ.pop("AGENT_ARGS", None)
+
+
+def test_hotel_nights_from_trip_dates():
+    from shared.utils import hotel_nights_from_trip_dates
+    assert hotel_nights_from_trip_dates({}) == 7
+    assert hotel_nights_from_trip_dates({"start": "2026-03-01", "end": "2026-03-08"}) == 7
+    assert hotel_nights_from_trip_dates({"start": "bad", "end": "2026-03-08"}) == 7
+
+
+def test_reservation_filter_scopes_agent():
+    from shared.atlas import reservation_filter
+
+    filt = reservation_filter("TRIP-20260301-ABCD", agent_id="test-agent-123")
+    assert filt["_id"] == "TRIP-20260301-ABCD"
+    assert filt["agent_id"] == "test-agent-123"
+
+
+def test_extract_json_array():
+    from shared.json_utils import extract_json_array
+
+    assert extract_json_array('Here: [{"fact": "prefers business class"}]') == [
+        {"fact": "prefers business class"}
+    ]
+    assert extract_json_array("no array here") == []
+    assert extract_json_array('[{"a": 1}, {"b": 2}] extra') == [{"a": 1}, {"b": 2}]
+
+
+def test_filter_cleaners():
+    from shared.filters import clean_flight_filters, clean_hotel_filters, clean_car_filters
+
+    assert clean_flight_filters({"destination_city": "Paris", "travel_class": "Business"}) == {
+        "destination_city": "Paris", "travel_class": "business",
+    }
+    assert clean_hotel_filters({"city": "Rome", "stars": 4}) == {"city": "Rome", "stars": 4}
+    assert clean_car_filters({"make": "Kia", "category": "invalid"}) == {"make": "Kia"}
+
+
+def test_search_graph_builds():
+    try:
+        import langgraph  # noqa: F401
+    except ImportError:
+        return  # skipped when langgraph not installed (e.g. bare CI host)
+    from agent_flight.agent import build_flight_graph
+    from agent_hotel.agent import build_hotel_graph
+    from agent_car.agent import build_car_graph
+    for builder in (build_flight_graph, build_hotel_graph, build_car_graph):
+        assert builder() is not None
 
 
 def test_seed_generators():

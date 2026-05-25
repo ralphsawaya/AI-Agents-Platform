@@ -1,12 +1,8 @@
 {
   "mcpServers": {
-    "MongoDB": {
+    "MongoDB-Atlas-Local": {
       "command": "bash",
-      "args": [".cursor/run-mongodb-mcp.sh", "local"]
-    },
-    "MongoDB-Atlas": {
-      "command": "bash",
-      "args": [".cursor/run-mongodb-mcp.sh", "atlas"]
+      "args": [".cursor/run-mongodb-mcp.sh"]
     }
   }
 }

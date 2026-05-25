@@ -45,7 +45,7 @@ The assistant understands the request, searches a catalog of travel options, pre
 
 ### What makes it different from a simple chatbot
 
-- **Structured search, not hallucination** — Options come from a real MongoDB Atlas catalog with semantic (meaning-based) search, not invented listings.
+- **Structured search, not hallucination** — Options come from a real MongoDB catalog (`trip_data` on `127.0.0.1:55440`) with semantic (meaning-based) search, not invented listings.
 - **Selective planning** — The AI decides *which* categories to search (flights only, hotel + car, full trip, etc.) instead of always running everything.
 - **Memory** — Short-term context within a chat thread plus long-term preferences across sessions.
 - **Human in the loop** — Nothing is booked without explicit user confirmation.
@@ -54,7 +54,7 @@ The assistant understands the request, searches a catalog of travel options, pre
 
 Before the assistant can search, an administrator must:
 
-1. Connect **MongoDB Atlas** (where trip inventory and conversations live)
+1. Ensure **MongoDB** is running at `mongodb://127.0.0.1:55440/?directConnection=true` (platform and trip data share this instance)
 2. Add a **Voyage AI** key (powers semantic search quality)
 3. Choose an **LLM provider** (e.g. Claude, Gemini, OpenAI) in the agent Settings tab
 4. Load **sample data** once via Settings → "Load Sample Data" (3,000 documents: flights, hotels, cars)
@@ -63,7 +63,7 @@ Before the assistant can search, an administrator must:
 
 - Inventory is **synthetic sample data**, not live airline or hotel feeds
 - LLM usage depends on provider quotas and API keys; if the model is unavailable, search cannot start
-- Reservations use a placeholder traveler name in the current implementation
+- Reservations default traveler name to **Guest** unless `traveler_name` is passed in the reserve payload
 - Maximum **five** concurrent chat threads per agent
 
 ---
@@ -72,7 +72,9 @@ Before the assistant can search, an administrator must:
 
 ### System context
 
-Trip Agents runs as an **uploaded agent team** on the AI Agent Platform. Development source lives under `teams/trip_agents/`; at runtime the platform executes from `agent_platform/agents_store/<agent_id>/trip_agents/`.
+Trip Agents runs as an **uploaded agent team** on the AI Agent Platform (repository root `README.md`). Development source lives under `teams/trip_agents/`; at runtime the platform executes from `agent_platform/agents_store/<agent_id>/trip_agents/` (current agent ID: `10948768-5eb6-4d9e-a432-51796998697a`).
+
+When you edit files under `teams/trip_agents/`, mirror the same change under the matching `agents_store` copy so the running platform picks it up without re-uploading the zip. See `.cursor/rules/sync-team-to-agents-store.mdc` in the repository.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -92,9 +94,12 @@ Trip Agents runs as an **uploaded agent team** on the AI Agent Platform. Develop
                              │
          ┌───────────────────┴───────────────────┐
          ▼                                       ▼
-  Local MongoDB (agent_platform)          Atlas MongoDB (trip_data)
-  team_settings, platform metadata        inventory, chat, bookings
+  MongoDB @ 127.0.0.1:55440              MongoDB @ 127.0.0.1:55440
+  database: agent_platform               database: trip_data
+  team_settings, platform metadata       inventory, chat, bookings
 ```
+
+Both connections use the same MongoDB instance (`mongodb://127.0.0.1:55440/?directConnection=true`); only the database name differs.
 
 ### Architecture: plan-and-execute orchestrator
 
@@ -109,10 +114,10 @@ START → plan → execute_tools → (replan loop, max 2) → synthesize → per
 | Node | Responsibility |
 |------|----------------|
 | `plan` | LLM reads conversation + long-term prefs; returns `intent` (`chat` / `search` / `replan`) and optional `tool_calls` |
-| `execute_tools` | Runs planned tools sequentially; publishes partial results to `trip_search_progress` for UI streaming |
-| `replan_bump` | Increments retry counter when a search tool returns zero results |
+| `execute_tools` | Runs planned tools (independent searches in parallel); publishes partial results to `trip_search_progress` for UI streaming |
+| `replan_bump` | Increments retry counter when **all** invoked search tools return zero results |
 | `synthesize` | LLM picks best options and builds `proposed_bundle`; heuristic fallback if LLM fails |
-| `persist` | Writes assistant message to Atlas; triggers background preference extraction |
+| `persist` | Writes assistant message to `trip_data`; triggers background preference extraction |
 
 **Design rationale:** JSON planning avoids paid provider-native tool-calling, keeps search execution predictable, and lets the LLM focus on *what* to search rather than *how* vector search works.
 
@@ -127,7 +132,7 @@ Determined by `orchestrator/main.py` from `AGENT_ARGS.mode`:
 | `reserve` | UI sends `__RESERVE__{json}` | Single-node reserve graph → `trip_reservations` |
 | `cancel` | Message with reservation ID + cancel keywords | Direct delete + chat confirmation |
 | `modify` | Message with reservation ID + change keywords | Plan-and-execute in modify mode (single category) |
-| `update` | UI sends `__UPDATE__{json}` | Patches reservation document in Atlas |
+| `update` | UI sends `__UPDATE__{json}` | Patches reservation document in `trip_data` (category whitelisted) |
 
 **API intent routing** (`trip.py` `_detect_message_mode`) runs *before* the agent subprocess:
 
@@ -137,15 +142,15 @@ Determined by `orchestrator/main.py` from `AGENT_ARGS.mode`:
 
 ### Sub-agents (search tools)
 
-Each category is a small LangGraph invoked as a tool from `orchestrator/tools.py`:
+Each category is a small LangGraph (shared embed + search nodes in `shared/nodes/`) invoked as a tool from `orchestrator/tools.py`. Compiled graphs and query embeddings are cached per process.
 
 ```
 embed_query ──(ok)──→ search_{flights|hotels|cars} → END
      └──(error)──→ END
 ```
 
-| Agent | Directory | Atlas collection | State alias |
-|-------|-----------|------------------|-------------|
+| Agent | Directory | `trip_data` collection | State alias |
+|-------|-----------|------------------------|-------------|
 | Flight | `agent_flight/` | `trip_flights` | `FlightSearchState` |
 | Hotel | `agent_hotel/` | `trip_hotels` | `HotelSearchState` |
 | Car | `agent_car/` | `trip_cars` | `CarSearchState` |
@@ -155,7 +160,7 @@ All share `SearchAgentState` in `shared/state.py`.
 **Search pipeline:**
 
 1. **Embed** — Voyage AI `voyage-3-lite`, 512 dimensions (`shared/voyage.py`)
-2. **Vector search** — Atlas `$vectorSearch` on `embedded_description`, cosine similarity, 100 candidates → top 3 (`shared/atlas.py`)
+2. **Vector search** — `$vectorSearch` on `embedded_description`, cosine similarity, 100 candidates → top 3 (`shared/atlas.py`)
 3. **Pre-filters** — Exact match on structured fields extracted from the plan (e.g. `destination_city`, `stars`)
 
 | Collection | Filterable fields |
@@ -171,14 +176,18 @@ All share `SearchAgentState` in `shared/state.py`.
 
 The plan prompt (`trip_planner_plan.txt`) instructs the LLM to call **only** the categories the user explicitly requested.
 
-### Data layer: two MongoDB databases
+### Data layer: two databases, one MongoDB instance
 
-| Store | Connection | Database | Contents |
-|-------|------------|----------|----------|
-| **Local** | `MONGODB_URI` | `agent_platform` | `team_settings` (LLM provider, API keys, Atlas URI, Voyage key) |
-| **Atlas** | `ATLAS_MONGODB_URI` | `trip_data` | All trip domain data |
+All data lives on **`mongodb://127.0.0.1:55440/?directConnection=true`**.
 
-#### Atlas collections (`trip_data`)
+| Store | Connection variable | Database | Contents |
+|-------|---------------------|----------|----------|
+| **Platform** | `MONGODB_URI` | `agent_platform` | `team_settings` (LLM provider, API keys, Voyage key) |
+| **Trip domain** | `ATLAS_MONGODB_URI` | `trip_data` | Flights, hotels, cars, chat, reservations, vector indexes |
+
+Both variables default to `mongodb://127.0.0.1:55440/?directConnection=true`. Set them in repo-root `.env` and in the agent Settings tab.
+
+#### Trip domain collections (`trip_data` on `127.0.0.1:55440`)
 
 | Collection | Purpose |
 |------------|---------|
@@ -212,11 +221,9 @@ Active prompts:
 | `trip_planner_synthesize.txt` | `synthesize` node |
 | `memory_extraction.txt` | Background preference learning |
 
-Loaded via `shared/prompt_loader.py` with optional `{{variable}}` substitution.
-
 ### Suggested prompts API
 
-`GET /api/trip/{agent_id}/suggestions` builds three example prompts from **coherent Atlas samples**: a flight's `destination_city` is joined to a hotel in the same `city` and a car with matching `pickup_city` (aggregation with `$lookup`). Falls back to static prompts if Atlas is unavailable.
+`GET /api/trip/{agent_id}/suggestions` builds three example prompts from **coherent samples** in `trip_data`: a flight's `destination_city` is joined to a hotel in the same `city` and a car with matching `pickup_city` (aggregation with `$lookup`). Falls back to static prompts if MongoDB is unavailable.
 
 ### API endpoints
 
@@ -264,21 +271,26 @@ Responses: `{ "success": bool, "data": ..., "error": string | null }`.
 | Key | Purpose |
 |-----|---------|
 | `llm_provider`, `llm_model`, `api_keys` | LLM selection |
-| `ATLAS_MONGODB_URI` | Atlas connection for all trip data |
+| `ATLAS_MONGODB_URI` | Trip domain connection (`trip_data` on `127.0.0.1:55440`) |
 | `VOYAGE_AI_API_KEY` | Embeddings for search and seeding |
 
 **Environment fallbacks** (`shared/config.py`): `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `GROQ_API_KEY`, `MONGODB_URI`, `ATLAS_MONGODB_URI`, `VOYAGE_AI_API_KEY`, `LLM_PROVIDER`, `LLM_MODEL`
+
+**Project `.env` (local dev & Cursor MCP):** Copy `.env.example` to `.env` at the repository root. Both `MONGODB_URI` and `ATLAS_MONGODB_URI` should be `mongodb://127.0.0.1:55440/?directConnection=true`. Also set `VOYAGE_AI_API_KEY` for MCP and CLI seeding. The platform UI Settings tab writes the same keys into `team_settings` for runtime agent subprocesses. To sync `ATLAS_MONGODB_URI` into Settings after changing `.env`, run `scripts/update-atlas-uri.sh`.
+
+**Cursor MCP:** One MCP server — **`MongoDB-Atlas-Local`** — loads the connection string from `.env` via `.cursor/run-mongodb-mcp.sh`. Never put credentials in `.cursor/mcp.json`. Uses `ATLAS_MONGODB_URI` (fallback: `MONGODB_URI`), defaulting to `mongodb://127.0.0.1:55440/?directConnection=true`. You can query both `agent_platform` and `trip_data` from this single connection.
 
 **Runtime (set by platform executor):** `AGENT_ID`, `AGENT_ARGS` (JSON with `mode`, `thread_id`, `message`, `chat_history`, etc.)
 
 ### Resilience & error handling
 
-- LLM and Voyage calls retry with exponential backoff (`tenacity`)
+- LLM and Voyage calls retry transient failures with exponential backoff (`tenacity`); missing API keys fail fast
 - Sub-agents short-circuit on embedding failure (conditional edge to `END`)
-- Empty search results trigger replan (max 2) with relaxed filters
-- Synthesize falls back to heuristic bundle if LLM fails
+- Empty search results trigger replan (max 2) only when **all** planned searches return zero rows
+- Synthesize falls back to heuristic bundle if LLM fails (uses trip dates for cost when available)
 - Plan node returns a user-friendly error if the LLM is unavailable (e.g. API quota exceeded)
 - Memory extraction runs in a background thread — never blocks the response
+- Reservations are scoped by `agent_id`; update mode whitelists `flight` / `hotel` / `car` categories
 
 ### Packaging & deployment
 
@@ -299,7 +311,7 @@ trip_agents/
 │   ├── graph.py          # Plan-and-execute + reserve LangGraphs
 │   ├── state.py          # TripAgentState, TripReserveState
 │   └── tools.py          # Tool registry, search progress publishing
-├── agent_flight/         # Flight search sub-agent
+├── agent_flight/         # Flight search sub-agent (agent.py + shared nodes)
 ├── agent_hotel/          # Hotel search sub-agent
 ├── agent_car/            # Car search sub-agent
 ├── shared/
@@ -308,10 +320,13 @@ trip_agents/
 │   ├── llm.py            # Multi-provider LLM (cached, retry)
 │   ├── voyage.py         # Voyage AI embeddings
 │   ├── memory.py         # Long-term preference extract/inject
-│   ├── query_parser.py   # Filter validation helpers for tools
+│   ├── json_utils.py     # Brace-aware JSON extraction from LLM output
+│   ├── filters.py        # Search filter validation for tool plans
+│   ├── nodes/            # Shared embed + vector-search LangGraph nodes
+│   ├── search_graph.py   # Shared embed → search graph builder
 │   ├── state.py          # Shared SearchAgentState
 │   ├── prompt_loader.py  # Prompt template loader
-│   ├── prompts/          # External LLM prompt files
+│   ├── prompts/          # trip_planner_plan, trip_planner_synthesize, memory_extraction
 │   ├── config.py         # Environment variables and constants
 │   ├── logger.py
 │   └── utils.py
@@ -331,27 +346,38 @@ trip_agents/
 
 ### Key dependencies
 
-- **LangGraph** — Orchestrator and sub-agent graphs
-- **PyMongo** — MongoDB Atlas driver
+- **LangGraph** — Orchestrator and sub-agent graphs (no LangChain dependency)
+- **PyMongo** — MongoDB driver for local `127.0.0.1:55440` and Atlas-compatible `$vectorSearch`
 - **Voyage AI** — Semantic embeddings (`voyage-3-lite`, 512-dim)
 - **Tenacity** — Retry with exponential backoff
 - **Anthropic / Google GenAI / OpenAI / Groq** — LLM provider SDKs
-- **Certifi** — TLS for Atlas connections
+- **Certifi** — TLS when using cloud MongoDB URIs
 
 ### Quick start (developers)
 
 ```bash
-# 1. Configure keys in the platform Settings tab for the trip agent:
-#    ATLAS_MONGODB_URI, VOYAGE_AI_API_KEY, LLM provider + API key
+# 0. Platform setup (repository root README.md and .env.example):
+cp .env.example .env
+# Defaults in .env.example:
+#   MONGODB_URI=mongodb://127.0.0.1:55440/?directConnection=true
+#   ATLAS_MONGODB_URI=mongodb://127.0.0.1:55440/?directConnection=true
+# Also set VOYAGE_AI_API_KEY and LLM provider keys.
+
+# 1. Configure keys in the platform Settings tab for the trip agent
+#    (ATLAS_MONGODB_URI, VOYAGE_AI_API_KEY, LLM provider + API key).
+#    ATLAS_MONGODB_URI should be mongodb://127.0.0.1:55440/?directConnection=true
 
 # 2. Load sample data (Settings → Load Sample Data, or CLI):
-export ATLAS_MONGODB_URI="mongodb+srv://..."
+export ATLAS_MONGODB_URI="mongodb://127.0.0.1:55440/?directConnection=true"
 export VOYAGE_AI_API_KEY="..."
 python seed_data.py
 
 # 3. Open Agent Detail → Dashboard → Trip Planner and chat
 
-# 4. Package for upload:
+# 4. After editing source under teams/trip_agents/, sync to agents_store
+#    (or re-run build_zip.py and re-upload)
+
+# 5. Package for upload:
 python build_zip.py
 ```
 
@@ -362,4 +388,6 @@ python build_zip.py
 | "I'm having trouble processing that right now" | LLM API failure (quota, rate limit, invalid key). Check agent run logs under `agents_store/<id>/logs/`. Try another provider in Settings. |
 | Empty search results | Sample data not seeded, or vector indexes still building (~30s after seed) |
 | Suggestions show mismatched cities | Should not occur after coherent-trip sampling; verify `/suggestions` API |
-| Auth / connection errors | Missing or wrong `ATLAS_MONGODB_URI` or `VOYAGE_AI_API_KEY` in Settings |
+| Auth / connection errors | Missing or wrong `ATLAS_MONGODB_URI` or `VOYAGE_AI_API_KEY` in Settings or `.env`; URI should be `mongodb://127.0.0.1:55440/?directConnection=true` |
+| MCP cannot connect | `MONGODB_URI` / `ATLAS_MONGODB_URI` not set in repo-root `.env`; restart Cursor after updating |
+| MongoDB connection refused | MongoDB not running on `127.0.0.1:55440` |

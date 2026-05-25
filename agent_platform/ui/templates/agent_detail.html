@@ -310,9 +310,9 @@
             <div class="ts-section-title">Trip Sample Data</div>
             <div style="padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;">
                 <p style="font-size:0.84rem;color:#999;margin:0 0 14px 0;">
-                    Load 1,000 sample documents each for flights, hotels, and car rentals into MongoDB Atlas.
+                    Load 1,000 sample documents each for flights, hotels, and car rentals into the <code>trip_data</code> database on MongoDB (<code>127.0.0.1:55440</code>).
                     This creates vector search indexes for the Trip Planner to work.
-                    Requires both <strong>Atlas MongoDB URI</strong> and <strong>Voyage AI API Key</strong> to be configured above.
+                    Requires both <strong>Trip MongoDB URI</strong> and <strong>Voyage AI API Key</strong> to be configured above.
                 </p>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
                     <button class="ts-btn-save" id="ts-trip-seed-btn" onclick="_ts_seedTripData()" style="background:#a6e3a1;color:#1e1e2e;">

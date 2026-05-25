@@ -96,8 +96,8 @@ INTEGRATION_REGISTRY: dict[str, dict[str, str]] = {
         "category": "AI & Embeddings",
     },
     "ATLAS_MONGODB_URI": {
-        "label": "Atlas MongoDB URI",
-        "description": "Connection string for MongoDB Atlas (trip collections)",
+        "label": "Trip MongoDB URI",
+        "description": "Connection string for trip_data database (default: mongodb://127.0.0.1:55440/?directConnection=true)",
         "category": "Database",
     },
 }
