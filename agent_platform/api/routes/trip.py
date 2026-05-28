@@ -188,13 +188,18 @@ async def search_progress(agent_id: str, thread_id: str):
         doc = None
     if not doc:
         return _ok({"active": False, "flights": None, "hotels": None, "cars": None, "done": False})
+    done = doc.get("done", False)
+    phase = doc.get("phase")
+    if not phase:
+        phase = "done" if done else "searching"
     return _ok({
         "active": True,
         "flights": doc.get("flights"),
         "hotels": doc.get("hotels"),
         "cars": doc.get("cars"),
         "categories": doc.get("categories") or [],
-        "done": doc.get("done", False),
+        "done": done,
+        "phase": phase,
     })
 
 
