@@ -84,6 +84,34 @@
     .search-progress-bar { padding: 12px 0; }
     .sp-item { padding: 8px 12px; font-size: 13px; color: #9399b2; display: flex; align-items: center; gap: 8px; }
 
+    /* Recommendation pending (between search results and agent bundle) */
+    .recommendation-pending {
+        background: linear-gradient(135deg, #27273a 0%, #2a2a40 100%);
+        border: 1px solid #585b70;
+        border-left: 3px solid #89b4fa;
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-bottom: 16px;
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        animation: rp-glow 2s ease-in-out infinite;
+    }
+    @keyframes rp-glow {
+        0%, 100% { border-left-color: #89b4fa; box-shadow: 0 0 0 rgba(137, 180, 250, 0); }
+        50% { border-left-color: #74c7ec; box-shadow: 0 0 12px rgba(137, 180, 250, 0.15); }
+    }
+    .recommendation-pending .rp-text { flex: 1; min-width: 0; }
+    .recommendation-pending .rp-title { font-size: 13px; font-weight: 600; color: #cdd6f4; }
+    .recommendation-pending .rp-sub { font-size: 12px; color: #9399b2; margin-top: 4px; line-height: 1.45; }
+    .chat-msg.recommendation-pending-chat {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #9399b2;
+        font-style: italic;
+    }
+
     /* Suggestions */
     .suggestions-box { padding: 10px 16px; border-top: 1px solid #313244; background: #1e1e2e; }
     .suggestions-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
@@ -204,6 +232,7 @@
                 if (mode === 'cancel' || mode === 'update') {
                     await pollReservation(res.data.run_id);
                 } else {
+                    _hideRecommendationPending();
                     document.getElementById('resultsPanel').innerHTML = '';
                     selected = { flight: null, hotel: null, car: null };
                     latestResults = null;
@@ -226,6 +255,67 @@
     let _activeSearchCategories = [];
 
     const _CATEGORY_LABELS = { flights: 'flights', hotels: 'hotels', cars: 'cars' };
+
+    function _showRecommendationPending() {
+        const panel = document.getElementById('resultsPanel');
+        if (!panel || panel.querySelector('.recommendation-pending')) return;
+
+        const banner = document.createElement('div');
+        banner.className = 'recommendation-pending';
+        banner.id = 'recommendationPending';
+        banner.innerHTML = '<span class="spinner"></span>'
+            + '<div class="rp-text">'
+            + '<div class="rp-title">✨ Preparing your recommended trip</div>'
+            + '<div class="rp-sub">Search results are in — the agent is reviewing options and picking the best combination for you.</div>'
+            + '</div>';
+        panel.prepend(banner);
+
+        const chatEl = document.getElementById('chatMessages');
+        if (chatEl && !document.getElementById('chatRecommendationPending')) {
+            const empty = chatEl.querySelector('.empty-state');
+            if (empty) empty.remove();
+            const div = document.createElement('div');
+            div.className = 'chat-msg assistant recommendation-pending-chat';
+            div.id = 'chatRecommendationPending';
+            div.innerHTML = '<span class="spinner"></span> Preparing your recommendation…';
+            chatEl.appendChild(div);
+            chatEl.scrollTop = chatEl.scrollHeight;
+        }
+    }
+
+    function _hideRecommendationPending() {
+        document.getElementById('recommendationPending')?.remove();
+        document.getElementById('chatRecommendationPending')?.remove();
+    }
+
+    function _isSynthesizePending(prog) {
+        if (!prog || prog.done) return false;
+        if (prog.phase === 'synthesizing') return true;
+        const planned = prog.categories || _activeSearchCategories || [];
+        if (planned.length > 0) {
+            return planned.every(cat => _partialRendered[cat]);
+        }
+        return !!(_partialRendered.flights || _partialRendered.hotels || _partialRendered.cars);
+    }
+
+    function _showStartingSearch() {
+        const panel = document.getElementById('resultsPanel');
+        if (!panel) return;
+        if (panel.querySelector('.search-progress-bar, .results-section, .recommendation-pending, .bundle-card')) return;
+        panel.innerHTML = '<div class="search-progress-bar"><div class="sp-item"><span class="spinner"></span> Starting your trip search...</div></div>';
+    }
+
+    function _ensureReserveButton(panel) {
+        if (!panel || panel.querySelector('.btn-reserve') || panel.querySelector('.bundle-card')) return;
+        const btn = document.createElement('button');
+        btn.className = 'btn-reserve';
+        btn.id = 'reserveBtn';
+        btn.disabled = true;
+        btn.textContent = 'Select at least one option to reserve';
+        btn.onclick = function () { window.confirmReservation(); };
+        panel.appendChild(btn);
+        _updateReserveBtn();
+    }
 
     function _showSearchSpinners(categories) {
         const cats = (categories && categories.length) ? categories : _activeSearchCategories;
@@ -255,28 +345,43 @@
         const maxAttempts = 120;
         for (let i = 0; i < maxAttempts; i++) {
             await sleep(500);
+            let progData = null;
             try {
                 if (activeThread) {
                     const prog = await API.get(`${BASE}/threads/${activeThread}/search-progress`);
-                    if (prog.success && prog.data && prog.data.active) {
-                        if (prog.data.categories && prog.data.categories.length) {
-                            _showSearchSpinners(prog.data.categories);
-                        }
-                        _renderPartialResults(prog.data);
-                        if (prog.data.done) {
-                            await reloadThread();
-                            return;
+                    if (prog.success && prog.data) {
+                        progData = prog.data;
+                        if (prog.data.active) {
+                            if (prog.data.categories && prog.data.categories.length) {
+                                _showSearchSpinners(prog.data.categories);
+                            }
+                            _renderPartialResults(prog.data);
+                            if (prog.data.done) {
+                                _hideRecommendationPending();
+                                await reloadThread();
+                                return;
+                            }
                         }
                     }
                 }
                 const run = await API.get(`/api/runs/${runId}`);
                 const status = run && run.data ? run.data.status : null;
-                if (status && ['completed', 'success', 'failed', 'error'].includes(status)) {
+                const runFinished = status && ['completed', 'success', 'failed', 'error'].includes(status);
+                if (!runFinished) {
+                    if (!progData || !progData.active) {
+                        _showStartingSearch();
+                    } else if (_isSynthesizePending(progData)) {
+                        _showRecommendationPending();
+                    }
+                }
+                if (runFinished) {
+                    _hideRecommendationPending();
                     await reloadThread();
                     return;
                 }
             } catch (_) {}
         }
+        _hideRecommendationPending();
         await reloadThread();
     }
 
@@ -307,14 +412,23 @@
         }
 
         const planned = prog.categories || _activeSearchCategories || [];
-        const allPlannedDone = planned.length > 0 && planned.every(cat => _partialRendered[cat]);
-        if (prog.done || allPlannedDone) {
+        const allPlannedDone = planned.length > 0
+            ? planned.every(cat => _partialRendered[cat])
+            : !!(_partialRendered.flights || _partialRendered.hotels || _partialRendered.cars);
+        const synthesizePending = _isSynthesizePending(prog);
+
+        if (synthesizePending) {
+            _showRecommendationPending();
+        } else if (prog.done) {
+            _hideRecommendationPending();
+        }
+
+        if (prog.phase === 'synthesizing' || prog.done || allPlannedDone) {
             const bar = panel.querySelector('.search-progress-bar');
             if (bar) bar.remove();
-            if (!panel.querySelector('.btn-reserve') && !panel.querySelector('.bundle-card')) {
-                panel.innerHTML += '<button class="btn-reserve" id="reserveBtn" onclick="confirmReservation()" disabled>Select at least one option to reserve</button>';
-                _updateReserveBtn();
-            }
+        }
+        if (prog.done || allPlannedDone) {
+            _ensureReserveButton(panel);
         }
     }
 
@@ -407,6 +521,7 @@
     }
 
     function renderChat(thread) {
+        _hideRecommendationPending();
         const el = document.getElementById('chatMessages');
         el.innerHTML = '';
         (thread.messages || []).forEach(m => {
@@ -505,6 +620,7 @@
     }
 
     function renderProposedBundle(bundle, searchResults) {
+        _hideRecommendationPending();
         const panel = document.getElementById('resultsPanel');
         panel.innerHTML = '';
         selected = { flight: null, hotel: null, car: null };

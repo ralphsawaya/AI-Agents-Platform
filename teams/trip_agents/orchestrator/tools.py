@@ -127,7 +127,9 @@ def reset_search_progress(thread_id: str):
             {"$set": {
                 "flights": None, "hotels": None, "cars": None,
                 "categories": [],
-                "done": False, "started_at": datetime.now(timezone.utc),
+                "done": False,
+                "phase": "searching",
+                "started_at": datetime.now(timezone.utc),
             }},
             upsert=True,
         )
@@ -156,11 +158,28 @@ def set_planned_categories(thread_id: str, tool_calls: list[dict]):
         logger.warning("Failed to set planned categories for %s: %s", thread_id, exc)
 
 
+def mark_search_progress_synthesizing(thread_id: str):
+    """Signal UI that searches finished and the agent is building a recommendation."""
+    if not thread_id:
+        return
+    try:
+        get_search_progress().update_one(
+            {"_id": thread_id},
+            {"$set": {"phase": "synthesizing", "done": False}},
+            upsert=True,
+        )
+    except Exception as exc:
+        logger.warning("Failed to mark synthesizing for %s: %s", thread_id, exc)
+
+
 def mark_search_progress_done(thread_id: str):
     if not thread_id:
         return
     try:
-        get_search_progress().update_one({"_id": thread_id}, {"$set": {"done": True}})
+        get_search_progress().update_one(
+            {"_id": thread_id},
+            {"$set": {"done": True, "phase": "done"}},
+        )
     except Exception as exc:
         logger.warning("Failed to mark search progress done for %s: %s", thread_id, exc)
 

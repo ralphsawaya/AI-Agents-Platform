@@ -22,6 +22,7 @@ from orchestrator.tools import (
     ToolContext,
     execute_tool_calls,
     mark_search_progress_done,
+    mark_search_progress_synthesizing,
     reset_search_progress,
     set_planned_categories,
 )
@@ -171,9 +172,13 @@ def execute_tools_node(state: dict) -> dict:
     tool_calls = plan.get("tool_calls") or []
     ctx = _tool_context(state)
 
-    set_planned_categories(state.get("thread_id", ""), tool_calls)
+    thread_id = state.get("thread_id", "")
+    set_planned_categories(thread_id, tool_calls)
     tool_results, search_results, tool_trace = execute_tool_calls(tool_calls, ctx)
     merged = _merge_search_results(state.get("search_results") or {}, search_results)
+
+    if thread_id and tool_calls:
+        mark_search_progress_synthesizing(thread_id)
 
     prev_trace = list(state.get("tool_trace") or [])
     return {
@@ -184,6 +189,10 @@ def execute_tools_node(state: dict) -> dict:
 
 
 def synthesize_node(state: dict) -> dict:
+    thread_id = state.get("thread_id", "")
+    if thread_id:
+        mark_search_progress_synthesizing(thread_id)
+
     query = state.get("query", "")
     search_results = state.get("search_results") or {"flights": [], "hotels": [], "cars": []}
     tool_results = state.get("tool_results") or []
@@ -262,7 +271,6 @@ def synthesize_node(state: dict) -> dict:
         reply = ("I found " + ", ".join(parts) + ". Review the options and confirm when ready.") if parts else \
             "I couldn't find matching options. Try different criteria."
 
-    thread_id = state.get("thread_id", "")
     if thread_id:
         mark_search_progress_done(thread_id)
 
